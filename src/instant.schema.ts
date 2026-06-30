@@ -4,47 +4,47 @@ import { i } from "@instantdb/react";
 
 const _schema = i.schema({
   entities: {
-    $files: i.entity({
-      path: i.string().unique().indexed(),
-      url: i.string(),
-    }),
+    // 1. Extend the built-in System User collection
     $users: i.entity({
+      // Email is a default system field, we keep it optional since we use Guest Auth
       email: i.string().unique().indexed().optional(),
-      imageURL: i.string().optional(),
-      type: i.string().optional(),
+
+      // --- Our Custom Financial Wallet Fields (Must be .optional()) ---
+      balance: i.number().optional(),             // Main online wallet balance
+
+      // --- Our Offline Security Fields ---
+      voucherMaxBalance: i.number().optional(),   // Safe offline spending ceiling
+      sequenceNumber: i.number().optional(),      // Anti-replay sync counter
+      expiresAt: i.number().optional(),           // Offline ticket expiration timestamp
+      serverSignature: i.string().optional(),     // Server mathematical watermark
     }),
-    todos: i.entity({
-      text: i.string(),
-      done: i.boolean(),
-      createdAt: i.number(),
+
+    // 2. Real-Time Transaction Ledger
+    transactions: i.entity({
+      amount: i.number(),
+      type: i.string(),                 // "online" or "offline"
+      status: i.string(),               // "completed", "pending_sync", or "failed"
+      nonce: i.string(),                // Unique transaction ID flag
+      timestamp: i.number().indexed(),  // Chronological sorting key
+      rawPayload: i.string().optional(),// Crypto string packet (if offline)
     }),
   },
+
+  // 3. Update the Relational Links to point directly to $users
   links: {
-    $usersLinkedPrimaryUser: {
-      forward: {
-        on: "$users",
-        has: "one",
-        label: "linkedPrimaryUser",
-        onDelete: "cascade",
-      },
-      reverse: {
-        on: "$users",
-        has: "many",
-        label: "linkedGuestUsers",
-      },
+    userSentTransactions: {
+      forward: { on: "transactions", has: "many", label: "sentTransactions" },
+      reverse: { on: "$users", has: "one", label: "sender" },
     },
-  },
-  rooms: {
-    todos: {
-      presence: i.entity({}),
+    userReceivedTransactions: {
+      forward: { on: "transactions", has: "many", label: "receivedTransactions" },
+      reverse: { on: "$users", has: "one", label: "receiver" },
     },
   },
 });
 
-// This helps TypeScript display nicer intellisense
 type _AppSchema = typeof _schema;
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-interface AppSchema extends _AppSchema {}
+interface AppSchema extends _AppSchema { }
 const schema: AppSchema = _schema;
 
 export type { AppSchema };
