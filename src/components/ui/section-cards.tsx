@@ -105,6 +105,12 @@ export function SectionCards() {
 
   // ─── 4. LOCAL PAYLOAD PROCESSING FOR INBOUND CODES ───
   const processIncomingVoucher = async (decodedText: string, html5QrCodeInstance: Html5Qrcode) => {
+    // Strict guard check for TypeScript to ensure authState is defined
+    if (!authState?.id) {
+      alert("Authentication error: Please log in again.");
+      return;
+    }
+
     try {
       const parsed = JSON.parse(decodedText);
 
@@ -129,7 +135,7 @@ export function SectionCards() {
       const keyData = encoder.encode(envSecret);
       const messageData = encoder.encode(secretMessage);
 
-      const cryptoKey = await window.window.crypto.subtle.importKey(
+      const cryptoKey = await window.crypto.subtle.importKey(
         "raw",
         keyData,
         { name: "HMAC", hash: "SHA-256" },
@@ -141,7 +147,7 @@ export function SectionCards() {
         parsed.sig.match(/.{1,2}/g).map((byte: string) => parseInt(byte, 16))
       );
 
-      const isSignatureValid = await window.window.crypto.subtle.verify("HMAC", cryptoKey, sigBuffer, messageData);
+      const isSignatureValid = await window.crypto.subtle.verify("HMAC", cryptoKey, sigBuffer, messageData);
 
       if (!isSignatureValid) {
         alert("🚨 Security Alert: Digital signature validation failed! Data tampered.");
@@ -159,14 +165,13 @@ export function SectionCards() {
 
       const txId = crypto.randomUUID();
 
-      // Execute atomic balance mutations locally
-      // InstantDB updates local IndexedDB state instantly, and streams to cloud if online
+      // Execute atomic balance mutations locally via updated schema tracking constraints
       await db.transact([
         // Credit the receiver's state balance structure snapshot
         db.tx.$users[authState.id].update({
           balance: userBalance + parsed.amount
         }),
-        // Initialize state tracking ledger log item
+        // Initialize state tracking ledger log item using newly pushed attributes
         db.tx.transactions[txId].update({
           amount: parsed.amount,
           type: parsed.type,
@@ -176,7 +181,9 @@ export function SectionCards() {
           nonce: `tx_${parsed.nonce}`,
           timestamp: Date.now()
         }),
-        db.tx.transactions[txId].link({ sender: parsed.senderId, receiver: authState.id })
+        // Linking transaction accurately using unified structural schema parameters
+        db.tx.transactions[txId].link({ sender: parsed.senderId }),
+        db.tx.transactions[txId].link({ receiver: authState.id })
       ]);
 
       // If online, immediately settle/deduct from the sender's account state too
@@ -216,10 +223,11 @@ export function SectionCards() {
         config,
         (decodedText: string) => {
           console.log(`Scan matched: ${decodedText}`);
-          // Send raw stream string into our localized validation block
           processIncomingVoucher(decodedText, html5QrCode);
         },
-        (errorMessage) => { }
+        () => {
+          // Fixed: Removed unused 'errorMessage' property parameters to fulfill compiler rules
+        }
       ).catch((err) => {
         console.error("Failed to kickstart hardware camera loop:", err);
       });
@@ -262,7 +270,7 @@ export function SectionCards() {
     const paymentAmount = parseFloat(sendAmount);
     const timestamp = Date.now();
     const senderId = authState.id;
-    const senderBalanceBefore = userBalance; // 👈 Grab current accurate balance structure state
+    const senderBalanceBefore = userBalance;
 
     const nonce = Math.random().toString(36).substring(2, 15);
 
@@ -271,15 +279,13 @@ export function SectionCards() {
       type: `${isOnline ? "ONLINE_PAYMENT" : "OFFLINE_PAYMENT"}`,
       amount: paymentAmount,
       senderId: senderId,
-      senderBalanceBefore: senderBalanceBefore, // 👈 Certify the sender's balance inside the payload array
+      senderBalanceBefore: senderBalanceBefore,
       timestamp: timestamp,
       nonce: nonce
     };
 
     try {
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
-
-      // Include senderBalanceBefore inside the signed string hash message pipeline
       const secretMessage = `${senderId}-${paymentAmount}-${senderBalanceBefore}-${timestamp}-${nonce}`;
 
       const encoder = new TextEncoder();
@@ -440,7 +446,6 @@ export function SectionCards() {
                       variant="outline"
                       type="button"
                       onClick={async () => {
-                        // Mutate sender profile balance on complete exit click
                         await db.transact([
                           db.tx.$users[authState.id].update({
                             balance: userBalance - parseFloat(sendAmount)

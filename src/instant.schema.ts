@@ -9,7 +9,7 @@ const _schema = i.schema({
       // Email is a default system field, we keep it optional since we use Guest Auth
       email: i.string().unique().indexed().optional(),
 
-      // --- Our Custom Financial Wallet Fields (Must be .optional()) ---
+      // --- Our Custom Financial Wallet Fields ---
       balance: i.number().optional(),             // Main online wallet balance
 
       // --- Our Offline Security Fields ---
@@ -22,8 +22,10 @@ const _schema = i.schema({
     // 2. Real-Time Transaction Ledger
     transactions: i.entity({
       amount: i.number(),
-      type: i.string(),                 // "online" or "offline"
+      type: i.string(),                 // "ONLINE_PAYMENT" or "OFFLINE_PAYMENT"
       status: i.string(),               // "completed", "pending_sync", or "failed"
+      senderBalanceBefore: i.number(),  // Tracks cryptographically signed snapshot
+      senderBalanceAfter: i.number(),   // Remaining wallet balance post-transaction
       nonce: i.string(),                // Unique transaction ID flag
       timestamp: i.number().indexed(),  // Chronological sorting key
       rawPayload: i.string().optional(),// Crypto string packet (if offline)
@@ -32,17 +34,19 @@ const _schema = i.schema({
 
   // 3. Update the Relational Links to point directly to $users
   links: {
+    // Multi-directional relationship links for standard querying and traversal
     userSentTransactions: {
-      forward: { on: "transactions", has: "many", label: "sentTransactions" },
-      reverse: { on: "$users", has: "one", label: "sender" },
+      forward: { on: "transactions", has: "one", label: "sender" }, // 👈 FIXED: A transaction has exactly ONE sender
+      reverse: { on: "$users", has: "many", label: "sentTransactions" },
     },
     userReceivedTransactions: {
-      forward: { on: "transactions", has: "many", label: "receivedTransactions" },
-      reverse: { on: "$users", has: "one", label: "receiver" },
+      forward: { on: "transactions", has: "one", label: "receiver" }, // 👈 FIXED: A transaction has exactly ONE receiver
+      reverse: { on: "$users", has: "many", label: "receivedTransactions" },
     },
   },
 });
 
+// Provides enhanced TypeScript intellisense autocomplete support
 type _AppSchema = typeof _schema;
 interface AppSchema extends _AppSchema { }
 const schema: AppSchema = _schema;
