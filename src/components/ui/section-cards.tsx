@@ -205,6 +205,7 @@ export function SectionCards() {
   };
 
   /// Camera lens tracking logic safely declared above early returns
+  /// Camera lens tracking logic safely declared above early returns
   useEffect(() => {
     if (!isScannerMounted || !isMobile) return;
 
@@ -223,10 +224,11 @@ export function SectionCards() {
         config,
         (decodedText: string) => {
           console.log(`Scan matched: ${decodedText}`);
+          // 🚀 FIXED: Send the payload straight into the cryptographic validation & database execution engine
           processIncomingVoucher(decodedText, html5QrCode);
         },
         () => {
-          // Fixed: Removed unused 'errorMessage' property parameters to fulfill compiler rules
+          // Frame analysis failures can safely be ignored to protect system performance
         }
       ).catch((err) => {
         console.error("Failed to kickstart hardware camera loop:", err);
