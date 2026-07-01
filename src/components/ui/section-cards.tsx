@@ -108,6 +108,7 @@ export function SectionCards() {
 
     function onScanFailure(errorMessage: string) {
       // Intentionally empty
+      console.log("Scanner failed to scan", errorMessage)
     }
 
     scanner.render(onScanSuccess, onScanFailure);
