@@ -31,12 +31,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ReactQRCode } from '@lglab/react-qr-code'
-import { Html5QrcodeScanner } from "html5-qrcode" // The Camera Engine
+import { Html5Qrcode } from "html5-qrcode" // The Camera Engine
 import React from "react"
 import { isMobile } from 'react-device-detect';
 import { db } from "../../lib/db"
-
-
 
 export function SectionCards() {
   // ─── 1. ALL HOOK DECLARATIONS AT THE TOP LEVEL ───
@@ -47,7 +45,6 @@ export function SectionCards() {
     authState ? { $users: { $: { where: { id: authState.id } } } } : null
   );
 
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [sendAmount, setSendAmount] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +63,38 @@ export function SectionCards() {
   const dbUser = data?.$users?.[0];
   const userBalance = dbUser?.balance ?? 0;
 
+  // ─── REAL-TIME INTERNET ACCURACY TRACKING ───
+  const [isOnline, setIsOnline] = useState(true);
+  const connectionStatus = db.useConnectionStatus();
+
+  useEffect(() => {
+    // 1. Function to check if we can actually reach the live internet
+    const verifyActualConnectivity = async () => {
+      try {
+        const response = await fetch("https://www.google.com/favicon.ico", {
+          method: "HEAD",
+          mode: "no-cors",
+          cache: "no-store",
+        });
+        response
+        setIsOnline(true);
+      } catch (error) {
+        setIsOnline(false);
+      }
+    };
+
+    verifyActualConnectivity();
+    const pingInterval = setInterval(verifyActualConnectivity, 3000);
+
+    if (connectionStatus === "authenticated") {
+      setIsOnline(true);
+    }
+
+    return () => {
+      clearInterval(pingInterval);
+    };
+  }, [connectionStatus]);
+
   // ─── 3. SYNCHRONIZE BACKEND DATA TO COMPONENT STATE VIA EFFECTS ───
   useEffect(() => {
     console.log("Your live offline/online balance:", userBalance);
@@ -74,54 +103,140 @@ export function SectionCards() {
     }
   }, [userBalance]);
 
-  // Camera lens tracking logic safely declared above early returns
+  // ─── 4. LOCAL PAYLOAD PROCESSING FOR INBOUND CODES ───
+  const processIncomingVoucher = async (decodedText: string, html5QrCodeInstance: Html5Qrcode) => {
+    try {
+      const parsed = JSON.parse(decodedText);
+
+      // Gate A: App validation check
+      if (parsed.app !== "FAYD") {
+        alert("Invalid QR Code: Not a FAYD asset token.");
+        return;
+      }
+
+      // Gate B: 2-Minute Expiration Verification Window
+      const twoMinutes = 2 * 60 * 1000;
+      if (Date.now() - parsed.timestamp > twoMinutes) {
+        alert("Transaction Expired: Request a fresh QR code from the sender.");
+        return;
+      }
+
+      // Gate C: Recalculate Cryptographic Signature (Includes senderBalanceBefore)
+      const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
+      const secretMessage = `${parsed.senderId}-${parsed.amount}-${parsed.senderBalanceBefore}-${parsed.timestamp}-${parsed.nonce}`;
+
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(envSecret);
+      const messageData = encoder.encode(secretMessage);
+
+      const cryptoKey = await window.window.crypto.subtle.importKey(
+        "raw",
+        keyData,
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"]
+      );
+
+      const sigBuffer = new Uint8Array(
+        parsed.sig.match(/.{1,2}/g).map((byte: string) => parseInt(byte, 16))
+      );
+
+      const isSignatureValid = await window.window.crypto.subtle.verify("HMAC", cryptoKey, sigBuffer, messageData);
+
+      if (!isSignatureValid) {
+        alert("🚨 Security Alert: Digital signature validation failed! Data tampered.");
+        return;
+      }
+
+      // Gate D: Cryptographically Validated Balance Sanity Check
+      if (parsed.senderBalanceBefore < parsed.amount) {
+        alert("Transaction Declined: Sender has insufficient certified funds.");
+        return;
+      }
+
+      // Turn off camera viewport stream completely on validation success
+      await html5QrCodeInstance.stop();
+
+      const txId = crypto.randomUUID();
+
+      // Execute atomic balance mutations locally
+      // InstantDB updates local IndexedDB state instantly, and streams to cloud if online
+      await db.transact([
+        // Credit the receiver's state balance structure snapshot
+        db.tx.$users[authState.id].update({
+          balance: userBalance + parsed.amount
+        }),
+        // Initialize state tracking ledger log item
+        db.tx.transactions[txId].update({
+          amount: parsed.amount,
+          type: parsed.type,
+          status: isOnline ? "completed" : "pending_sync",
+          senderBalanceBefore: parsed.senderBalanceBefore,
+          senderBalanceAfter: parsed.senderBalanceBefore - parsed.amount,
+          nonce: `tx_${parsed.nonce}`,
+          timestamp: Date.now()
+        }),
+        db.tx.transactions[txId].link({ sender: parsed.senderId, receiver: authState.id })
+      ]);
+
+      // If online, immediately settle/deduct from the sender's account state too
+      if (isOnline) {
+        await db.transact([
+          db.tx.$users[parsed.senderId].update({
+            balance: parsed.senderBalanceBefore - parsed.amount
+          })
+        ]);
+      }
+
+      alert(`✅ Successfully processed ₦${parsed.amount}!`);
+      setIsScannerMounted(false);
+
+    } catch (e) {
+      console.error("Failed handling parsed data payload stream:", e);
+      alert("Error parsing standard FAYD transactional payload structure.");
+    }
+  };
+
+  /// Camera lens tracking logic safely declared above early returns
   useEffect(() => {
-    // Only mount if the dialog says it's open and the user is on mobile
     if (!isScannerMounted || !isMobile) return;
 
-    const element = document.getElementById(CAMERA_VIEWPORT_ID);
-    if (!element) return;
+    const timeoutId = setTimeout(() => {
+      const element = document.getElementById(CAMERA_VIEWPORT_ID);
+      if (!element) return;
 
-    const scanner = new Html5QrcodeScanner(
-      CAMERA_VIEWPORT_ID,
-      { fps: 10, qrbox: 250 },
-      /* verbose= */ false
-    );
+      const html5QrCode = new Html5Qrcode(CAMERA_VIEWPORT_ID);
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 }
+      };
 
-    function onScanSuccess(decodedText: string, decodedResult: any) {
-      console.log(`Scan result: ${decodedText}`, decodedResult);
+      html5QrCode.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText: string) => {
+          console.log(`Scan matched: ${decodedText}`);
+          // Send raw stream string into our localized validation block
+          processIncomingVoucher(decodedText, html5QrCode);
+        },
+        (errorMessage) => { }
+      ).catch((err) => {
+        console.error("Failed to kickstart hardware camera loop:", err);
+      });
 
-      scanner.clear()
-        .then(() => {
-          console.log("Scanner cleared successfully post-scan.");
-          try {
-            const parsed = JSON.parse(decodedText);
-            if (parsed.type === "OFFLINE_PAYMENT") {
-              setBalance(prev => prev + parsed.amount);
-            }
-          } catch (e) {
-            console.error("Invalid QR payload data standard", e);
-          }
-        })
-        .catch((error) => console.error("Failed to clear scanner on success match", error));
-    }
-
-    function onScanFailure(errorMessage: string) {
-      // Intentionally empty
-      console.log("Scanner failed to scan", errorMessage)
-    }
-
-    scanner.render(onScanSuccess, onScanFailure);
+      (window as any)._activeScannerInstance = html5QrCode;
+    }, 50);
 
     return () => {
-      scanner.clear().catch((error) => console.error("Failed to clear scanner", error));
+      clearTimeout(timeoutId);
+      const activeEngine = (window as any)._activeScannerInstance;
+      if (activeEngine && activeEngine.isScanning) {
+        activeEngine.stop()
+          .then(() => console.log("Camera thread killed cleanly."))
+          .catch((err: any) => console.error("Failed clear down:", err));
+      }
     };
-  }, [isScannerMounted, isMobile]);
-
-  // ─── 4. HANDLERS AND EVENT MANAGEMENT ───
-  const goOnline = () => setIsOnline(true);
-  const goOffline = () => setIsOnline(false);
-
+  }, [isScannerMounted, isMobile, userBalance, isOnline]);
 
   const handleAmountChange = (val: string) => {
     setSendAmount(val);
@@ -140,36 +255,80 @@ export function SectionCards() {
     handleAmountChange(calculated);
   };
 
-  const handleConfirmSend = (e: React.FormEvent) => {
+  const handleConfirmSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (error || !sendAmount) return;
+    if (error || !sendAmount || !authState?.id) return;
+
+    const paymentAmount = parseFloat(sendAmount);
+    const timestamp = Date.now();
+    const senderId = authState.id;
+    const senderBalanceBefore = userBalance; // 👈 Grab current accurate balance structure state
+
+    const nonce = Math.random().toString(36).substring(2, 15);
 
     const tokenPayload = {
       app: "FAYD",
-      type: "OFFLINE_PAYMENT",
-      amount: parseFloat(sendAmount),
-      timestamp: Date.now()
+      type: `${isOnline ? "ONLINE_PAYMENT" : "OFFLINE_PAYMENT"}`,
+      amount: paymentAmount,
+      senderId: senderId,
+      senderBalanceBefore: senderBalanceBefore, // 👈 Certify the sender's balance inside the payload array
+      timestamp: timestamp,
+      nonce: nonce
     };
 
-    setGeneratedPayload(JSON.stringify(tokenPayload));
-    setSendStep("QR_DISPLAY");
+    try {
+      const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
+
+      // Include senderBalanceBefore inside the signed string hash message pipeline
+      const secretMessage = `${senderId}-${paymentAmount}-${senderBalanceBefore}-${timestamp}-${nonce}`;
+
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(envSecret);
+      const messageData = encoder.encode(secretMessage);
+
+      const cryptoKey = await window.crypto.subtle.importKey(
+        "raw",
+        keyData,
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+
+      const signatureBuffer = await window.crypto.subtle.sign("HMAC", cryptoKey, messageData);
+
+      const signatureHex = Array.from(new Uint8Array(signatureBuffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      const finalPayload = {
+        ...tokenPayload,
+        sig: signatureHex
+      };
+
+      setGeneratedPayload(JSON.stringify(finalPayload));
+      setSendStep("QR_DISPLAY");
+
+      console.log("🔒 Secure encrypted QR bundle compiled successfully.");
+    } catch (err) {
+      console.error("Cryptographic signing operation failed:", err);
+      setError("Failed to securely sign transaction.");
+    }
   };
 
-  // ─── 5. CONDITIONAL RENDER CLAUSES (PLACED SAFELY AFTER ALL HOOKS) ───
   if (!authState) return null;
   if (isLoading) return <div>Loading balance...</div>;
 
   return (
-
     <div className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-1 @5xl/main:grid-cols-1 dark:*:data-[slot=card]:bg-card">
       <Card className={`p-3 mb-3 ${isOnline ? 'bg-yellow-200' : 'bg-green-200'}`}>
         <CardHeader>
           <CardDescription className={`flex gap-2 ${isOnline ? 'text-yellow-600' : 'text-green-600'}`}>
             <IconInfoOctagonFilled className="size-4 " />
-            Kindly go offline to test the app / kindly turn airplane mode on
+            {isOnline ? "Kindly go offline to test the app / kindly turn airplane mode on" : "Kindly go online to test the app / kindly off airplane mode"}
           </CardDescription>
         </CardHeader>
       </Card>
+
       <Card className={`@container/card border-5 ${isOnline ? 'border-green-800 bg-green-100' : 'border-yellow-800 bg-yellow-100'} shadow-lg`}>
         <CardHeader>
           <CardDescription>Balance</CardDescription>
@@ -178,8 +337,12 @@ export function SectionCards() {
           </CardTitle>
           <CardAction>
             <Badge className={isOnline ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}>
-              <span>{isOnline ? "online" : "offline"}</span>
-              {isOnline ? <IconPlayerRecordFilled className="size-4" /> : <IconPlayerRecordFilled className="size-4" />}
+              <span>
+                {isOnline ? "online" : "offline"}
+                {!isOnline && connectionStatus === "authenticated" && " (sync delayed)"}
+                {!isOnline && (connectionStatus === "connecting" || connectionStatus === "opened") && " (reconnecting...)"}
+              </span>
+              <IconPlayerRecordFilled className="size-4" />
             </Badge>
           </CardAction>
         </CardHeader>
@@ -190,8 +353,7 @@ export function SectionCards() {
         </CardFooter>
       </Card>
 
-      <div className="flex m-2 gap-2 ">
-
+      <div className="flex m-2 gap-2">
         {/* ==================== SEND DIALOG WORKFLOW ==================== */}
         <Dialog onOpenChange={(isOpen) => { if (!isOpen) setSendStep("FORM_ENTRY"); }}>
           <DialogTrigger asChild>
@@ -199,8 +361,6 @@ export function SectionCards() {
               Send
             </button>
           </DialogTrigger>
-          <button className="hidden" onClick={goOnline}>Go Online</button>
-          <button className="hidden" onClick={goOffline}>Go Offline</button>
 
           <DialogContent className="sm:max-w-md bg-white">
             <DialogHeader>
@@ -213,7 +373,6 @@ export function SectionCards() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* SEND STEP 1 VIEW LAYOUT: INPUT VALUES STAGE */}
             {sendStep === "FORM_ENTRY" ? (
               <form onSubmit={handleConfirmSend} className="space-y-4 my-2">
                 <div className="flex justify-between items-center text-xs text-gray-500 px-1">
@@ -254,29 +413,17 @@ export function SectionCards() {
                 </DialogFooter>
               </form>
             ) : (
-              /* SEND STEP 2 VIEW LAYOUT: RENDER THE HIGH CONTRAST SVG QR CODE VECTOR */
               <div className="space-y-6 my-2 text-center animate-fade-in">
                 <div className="bg-white border-2 border-slate-100 p-6 rounded-2xl inline-block mx-auto shadow-sm relative overflow-hidden">
-                  {/* Visual Laser Line Animation Effect */}
                   <div className="absolute inset-x-0 h-0.5 bg-emerald-500 top-0 animate-bounce"></div>
-                  {/* <QRCode
-                    value={generatedPayload}
-                    size={160}
-                    level="M"
-                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                  /> */}
                   <ReactQRCode
                     dataModulesSettings={{
                       style: 'rounded',
                       color: '#4267B2',
                       size: 1,
                     }}
-                    finderPatternOuterSettings={{
-                      style: 'inpoint-sm',
-                    }}
-                    finderPatternInnerSettings={{
-                      style: 'leaf-sm',
-                    }}
+                    finderPatternOuterSettings={{ style: 'inpoint-sm' }}
+                    finderPatternInnerSettings={{ style: 'leaf-sm' }}
                     marginSize={2}
                     size={256}
                     value={generatedPayload}
@@ -289,7 +436,18 @@ export function SectionCards() {
 
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button variant="outline" type="button" onClick={() => setBalance(prev => prev - parseFloat(sendAmount))}>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={async () => {
+                        // Mutate sender profile balance on complete exit click
+                        await db.transact([
+                          db.tx.$users[authState.id].update({
+                            balance: userBalance - parseFloat(sendAmount)
+                          })
+                        ]);
+                      }}
+                    >
                       Done (Deduct Funds)
                     </Button>
                   </DialogClose>
@@ -315,8 +473,6 @@ export function SectionCards() {
                   Camera Scanning is only available on mobile devices.
                 </DialogDescription>
               </DialogHeader>
-
-              {/* Footer inside the desktop view */}
               <DialogFooter>
                 <DialogClose asChild>
                   <Button variant="outline">Close Window</Button>
@@ -338,7 +494,6 @@ export function SectionCards() {
                 </div>
               </div>
 
-              {/* Footer inside the mobile view */}
               <DialogFooter>
                 <DialogClose asChild>
                   <Button variant="outline">Close Camera Lens</Button>
@@ -347,18 +502,10 @@ export function SectionCards() {
             </DialogContent>
           )}
         </Dialog>
-
-
-
       </div>
 
-
-
-
       <Card>
-        <CardHeader>
-          Recent Transactions
-        </CardHeader>
+        <CardHeader>Recent Transactions</CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
@@ -380,10 +527,6 @@ export function SectionCards() {
           </Table>
         </CardContent>
       </Card>
-
     </div>
   )
 }
-
-
-
