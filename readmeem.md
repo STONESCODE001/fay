@@ -170,28 +170,6 @@ export default App;
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
       <div className="flex m-2 gap-2">
         {/* ==================== SEND DIALOG ==================== */}
         <Dialog>
@@ -277,3 +255,128 @@ export default App;
         </Dialog>
 
       </div>
+
+
+
+
+
+
+
+
+
+      import React, { useState, useEffect, useRef } from "react";
+// Add your specific imports here (e.g., your database instance, Html5QrcodeScanner, etc.)
+
+export function SectionCards() {
+  // ─── 1. ALL HOOK DECLARATIONS AT THE TOP LEVEL ───
+  const user = db.useUser();
+  const { user: authState } = db.useAuth();
+
+  // Query hook uses conditional logic inside its argument rather than wrapper blocks
+  const { data, isLoading } = db.useQuery(
+    authState ? { $users: { $: { where: { id: authState.id } } } } : null
+  );
+
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [sendAmount, setSendAmount] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Dialog routing states
+  const [sendStep, setSendStep] = useState<"FORM_ENTRY" | "QR_DISPLAY">("FORM_ENTRY");
+  const [isScannerMounted, setIsScannerMounted] = useState<boolean>(false);
+  const [generatedPayload, setGeneratedPayload] = useState<string>("");
+
+  // Dynamic state representation for balance sync
+  const [balance, setBalance] = useState<number>(0);
+
+  // Camera device references
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const CAMERA_VIEWPORT_ID = "fayd-modal-lens";
+
+  // ─── 2. EXTRACT & CALCULATE DERIVED VALUES ───
+  const dbUser = data?.$users?.[0];
+  const userBalance = dbUser?.balance ?? 0;
+
+  // ─── 3. SYNCHRONIZE BACKEND DATA TO COMPONENT STATE VIA EFFECTS ───
+  useEffect(() => {
+    console.log("Your live offline/online balance:", userBalance);
+    if (userBalance !== undefined) {
+      setBalance(userBalance);
+    }
+  }, [userBalance]);
+
+  // Camera lens tracking logic safely declared above early returns
+  useEffect(() => {
+    if (!isScannerMounted || !isMobile) return;
+
+    const element = document.getElementById(CAMERA_VIEWPORT_ID);
+    if (!element) return;
+
+    const scanner = new Html5QrcodeScanner(
+      CAMERA_VIEWPORT_ID,
+      { fps: 10, qrbox: 250 },
+      /* verbose= */ false
+    );
+
+    return () => {
+      scanner.clear().catch((error) => console.error("Failed to clear scanner", error));
+    };
+  }, [isScannerMounted, isMobile]);
+
+  // ─── 4. HANDLERS AND EVENT MANAGEMENT ───
+  const goOnline = () => setIsOnline(true);
+  const goOffline = () => setIsOnline(false);
+
+  const handleAmountChange = (val: string) => {
+    setSendAmount(val);
+    const num = parseFloat(val);
+    if (isNaN(num) || num <= 0) {
+      setError("Please input a valid number amount");
+    } else if (num > balance) {
+      setError("Insufficient wallet funds available");
+    } else {
+      setError(null);
+    }
+  };
+
+  const handleSetPercentage = (pct: number) => {
+    const calculated = (balance * pct).toFixed(2);
+    handleAmountChange(calculated);
+  };
+
+  const handleConfirmSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (error || !sendAmount) return;
+
+    const tokenPayload = {
+      app: "FAYD",
+      type: "OFFLINE_PAYMENT",
+      amount: parseFloat(sendAmount),
+      timestamp: Date.now()
+    };
+
+    setGeneratedPayload(JSON.stringify(tokenPayload));
+    setSendStep("QR_DISPLAY"); 
+  };
+
+  // ─── 5. CONDITIONAL RENDER CLAUSES (PLACED SAFELY AFTER ALL HOOKS) ───
+  if (!authState) return null;
+  if (isLoading) return <div>Loading balance...</div>;
+
+  // ─── 6. COMPONENT RENDER OUTPUT (JSX) ───
+  return (
+    <div>
+      {/* Place your full component JSX layout here */}
+      <p>Balance: {balance}</p>
+    </div>
+  );
+
+
+
+
+
+
+
+
+  
+}

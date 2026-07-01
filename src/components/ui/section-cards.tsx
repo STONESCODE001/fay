@@ -34,100 +34,107 @@ import { ReactQRCode } from '@lglab/react-qr-code'
 import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from "html5-qrcode" // The Camera Engine
 import React from "react"
 import { isMobile } from 'react-device-detect';
+import { db } from "../../lib/db"
 
 
 
 export function SectionCards() {
+  // ─── 1. ALL HOOK DECLARATIONS AT THE TOP LEVEL ───
+  const user = db.useUser();
+  const { user: authState } = db.useAuth();
+
+  // Query hook uses conditional logic inside its argument rather than wrapper blocks
+  const { data, isLoading } = db.useQuery(
+    authState ? { $users: { $: { where: { id: authState.id } } } } : null
+  );
+
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [sendAmount, setSendAmount] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const goOnline = () => setIsOnline(true);
-    const goOffline = () => setIsOnline(false);
+  // Dialog routing states
+  const [sendStep, setSendStep] = useState<"FORM_ENTRY" | "QR_DISPLAY">("FORM_ENTRY");
+  const [isScannerMounted, setIsScannerMounted] = useState<boolean>(false);
+  const [generatedPayload, setGeneratedPayload] = useState<string>("");
 
-    window.addEventListener('online', goOnline);
-    window.addEventListener('offline', goOffline);
-
-    return () => {
-      window.removeEventListener('online', goOnline);
-      window.removeEventListener('offline', goOffline);
-    };
-  }, []);
-
-
-  // Mock balance state
-  const [balance, setBalance] = useState<number>(150.00)
-  const [sendAmount, setSendAmount] = useState<string>("")
-  const [error, setError] = useState<string | null>(null)
-
-  // ─── DIALOG ROUTING STATES ───
-  // Controls steps inside the Send Modal: 'FORM_ENTRY' | 'QR_DISPLAY'
-  const [sendStep, setSendStep] = useState<"FORM_ENTRY" | "QR_DISPLAY">("FORM_ENTRY")
-  // Controls whether the Scanner element is active in the Receive Modal
-  const [isScannerMounted, setIsScannerMounted] = useState<boolean>(false)
-
-  // Dynamic values parsed across elements
-  const [generatedPayload, setGeneratedPayload] = useState<string>("")
+  // Dynamic state representation for balance sync
+  const [balance, setBalance] = useState<number>(0);
 
   // Camera device references
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
-  const CAMERA_VIEWPORT_ID = "fayd-modal-lens"
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const CAMERA_VIEWPORT_ID = "fayd-modal-lens";
 
-  // Amount validations handler
-  const handleAmountChange = (val: string) => {
-    setSendAmount(val)
-    const num = parseFloat(val)
-    if (isNaN(num) || num <= 0) {
-      setError("Please input a valid number amount")
-    } else if (num > balance) {
-      setError("Insufficient wallet funds available")
-    } else {
-      setError(null)
-    }
-  }
+  // ─── 2. EXTRACT & CALCULATE DERIVED VALUES ───
+  const dbUser = data?.$users?.[0];
+  const userBalance = dbUser?.balance ?? 0;
 
-  const handleSetPercentage = (pct: number) => {
-    const calculated = (balance * pct).toFixed(2)
-    handleAmountChange(calculated)
-  }
-
-  // ─── ACTION A: CONFIRM & GENERATE THE VECTOR QR CODE ───
-  const handleConfirmSend = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (error || !sendAmount) return
-
-    // Package a text string layout representing our placeholder payment data token
-    const tokenPayload = {
-      app: "FAYD",
-      type: "OFFLINE_PAYMENT",
-      amount: parseFloat(sendAmount),
-      timestamp: Date.now()
-    }
-
-    setGeneratedPayload(JSON.stringify(tokenPayload))
-    setSendStep("QR_DISPLAY") // Swap modal screen content view to the QR container
-  }
-
-  // ─── ACTION B: CAMERA LENS DETECTOR TRACKING LOGIC ───
+  // ─── 3. SYNCHRONIZE BACKEND DATA TO COMPONENT STATE VIA EFFECTS ───
   useEffect(() => {
-    // 1. Only initialize if the dialog is open AND the user is actually on mobile
+    console.log("Your live offline/online balance:", userBalance);
+    if (userBalance !== undefined) {
+      setBalance(userBalance);
+    }
+  }, [userBalance]);
+
+  // Camera lens tracking logic safely declared above early returns
+  useEffect(() => {
     if (!isScannerMounted || !isMobile) return;
 
-    // 2. Extra safety check: verify the DOM element actually exists before passing it to the library
     const element = document.getElementById(CAMERA_VIEWPORT_ID);
     if (!element) return;
 
     const scanner = new Html5QrcodeScanner(
       CAMERA_VIEWPORT_ID,
       { fps: 10, qrbox: 250 },
-    /* verbose= */ false
+      /* verbose= */ false
     );
-
 
     return () => {
       scanner.clear().catch((error) => console.error("Failed to clear scanner", error));
     };
-  }, [isScannerMounted, isMobile]); // Add both to your dependency array
+  }, [isScannerMounted, isMobile]);
 
+  // ─── 4. HANDLERS AND EVENT MANAGEMENT ───
+  const goOnline = () => setIsOnline(true);
+  const goOffline = () => setIsOnline(false);
+
+  const handleAmountChange = (val: string) => {
+    setSendAmount(val);
+    const num = parseFloat(val);
+    if (isNaN(num) || num <= 0) {
+      setError("Please input a valid number amount");
+    } else if (num > balance) {
+      setError("Insufficient wallet funds available");
+    } else {
+      setError(null);
+    }
+  };
+
+  const handleSetPercentage = (pct: number) => {
+    const calculated = (balance * pct).toFixed(2);
+    handleAmountChange(calculated);
+  };
+
+  const handleConfirmSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (error || !sendAmount) return;
+
+    const tokenPayload = {
+      app: "FAYD",
+      type: "OFFLINE_PAYMENT",
+      amount: parseFloat(sendAmount),
+      timestamp: Date.now()
+    };
+
+    setGeneratedPayload(JSON.stringify(tokenPayload));
+    setSendStep("QR_DISPLAY");
+  };
+
+  // ─── 5. CONDITIONAL RENDER CLAUSES (PLACED SAFELY AFTER ALL HOOKS) ───
+  if (!authState) return null;
+  if (isLoading) return <div>Loading balance...</div>;
+
+  // ─── 6. COMPONENT RENDER OUTPUT (JSX) ───
 
   return (
     <div className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-1 @5xl/main:grid-cols-1 dark:*:data-[slot=card]:bg-card">
@@ -143,7 +150,7 @@ export function SectionCards() {
         <CardHeader>
           <CardDescription>Balance</CardDescription>
           <CardTitle className="text-2xl font-extrabold tabular-nums @[250px]/card:text-3xl">
-            ₦850,000
+            ₦{balance}
           </CardTitle>
           <CardAction>
             <Badge className={isOnline ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}>
@@ -185,11 +192,11 @@ export function SectionCards() {
               <form onSubmit={handleConfirmSend} className="space-y-4 my-2">
                 <div className="flex justify-between items-center text-xs text-gray-500 px-1">
                   <span>Available Balance</span>
-                  <span className="font-semibold text-gray-700">${balance.toFixed(2)}</span>
+                  <span className="font-semibold text-gray-700">₦{balance.toFixed(2)}</span>
                 </div>
 
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-medium text-gray-400">$</span>
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-medium text-gray-400">₦</span>
                   <input
                     type="text"
                     inputMode="decimal"

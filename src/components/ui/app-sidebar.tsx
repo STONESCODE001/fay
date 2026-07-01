@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRef } from "react"
 import {
   IconDashboardFilled,
   IconInnerShadowTop,
@@ -14,7 +13,6 @@ import {
 import { NavMain } from "@/components/ui/nav-main"
 import {
   Sidebar,
-  SidebarContent,
   SidebarFooter,
   SidebarHeader,
   SidebarMenu,
