@@ -60,7 +60,6 @@ export function SectionCards() {
   const [balance, setBalance] = useState<number>(0);
 
   // Camera device references
-  //const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const CAMERA_VIEWPORT_ID = "fayd-modal-lens";
 
   // ─── 2. EXTRACT & CALCULATE DERIVED VALUES ───
@@ -77,19 +76,46 @@ export function SectionCards() {
 
   // Camera lens tracking logic safely declared above early returns
   useEffect(() => {
+    // Only mount if the dialog says it's open and the user is on mobile
     if (!isScannerMounted || !isMobile) return;
 
     const element = document.getElementById(CAMERA_VIEWPORT_ID);
     if (!element) return;
 
+    // 1. Initialize the scanner instance inside the lifecycle hook safely
     const scanner = new Html5QrcodeScanner(
       CAMERA_VIEWPORT_ID,
-      { fps: 10, qrbox: 250 },
-      /* verbose= */ false
+      { verbose: true, fps: 10, qrbox: 250, verbose: false }
     );
 
+    function onScanSuccess(decodedText: string, decodedResult: any) {
+      console.log(`Scan result: ${decodedText}`, decodedResult);
+
+      // 2. Shut down the scanner stream immediately on match to release the camera hardware
+      scanner.clear()
+        .then(() => {
+          console.log("Scanner cleared successfully post-scan.");
+
+          // 3. DO SOMETHING WITH THE PAYLOAD HERE
+          // Example: parse data, add balance credits, or close modal
+          try {
+            const parsed = JSON.parse(decodedText);
+            if (parsed.type === "OFFLINE_PAY  MENT") {
+              setBalance(prev => prev + parsed.amount);
+            }
+          } catch (e) {
+            console.error("Invalid QR payload data standard", e);
+          }
+        })
+        .catch((error) => console.error("Failed to clear scanner on success match", error));
+    }
+
+    // Render the camera interface frame
+    scanner.render(onScanSuccess);
+
+    // 4. CLEANUP: When dialog closes or component unmounts, release camera stream!
     return () => {
-      scanner.clear().catch((error) => console.error("Failed to clear scanner", error));
+      scanner.clear().catch((error) => console.error("Failed to clear scanner on teardown", error));
     };
   }, [isScannerMounted, isMobile]);
 
@@ -133,8 +159,6 @@ export function SectionCards() {
   // ─── 5. CONDITIONAL RENDER CLAUSES (PLACED SAFELY AFTER ALL HOOKS) ───
   if (!authState) return null;
   if (isLoading) return <div>Loading balance...</div>;
-
-  // ─── 6. COMPONENT RENDER OUTPUT (JSX) ───
 
   return (
 
