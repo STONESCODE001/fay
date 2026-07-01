@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import {
-  IconDashboardFilled,
   IconInnerShadowTop,
 } from "@tabler/icons-react"
 import {
