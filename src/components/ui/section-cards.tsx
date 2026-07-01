@@ -82,25 +82,21 @@ export function SectionCards() {
     const element = document.getElementById(CAMERA_VIEWPORT_ID);
     if (!element) return;
 
-    // 1. Initialize the scanner instance inside the lifecycle hook safely
     const scanner = new Html5QrcodeScanner(
       CAMERA_VIEWPORT_ID,
-      { verbose: true, fps: 10, qrbox: 250, verbose: false }
+      { fps: 10, qrbox: 250 },
+      /* verbose= */ false
     );
 
     function onScanSuccess(decodedText: string, decodedResult: any) {
       console.log(`Scan result: ${decodedText}`, decodedResult);
 
-      // 2. Shut down the scanner stream immediately on match to release the camera hardware
       scanner.clear()
         .then(() => {
           console.log("Scanner cleared successfully post-scan.");
-
-          // 3. DO SOMETHING WITH THE PAYLOAD HERE
-          // Example: parse data, add balance credits, or close modal
           try {
             const parsed = JSON.parse(decodedText);
-            if (parsed.type === "OFFLINE_PAY  MENT") {
+            if (parsed.type === "OFFLINE_PAYMENT") {
               setBalance(prev => prev + parsed.amount);
             }
           } catch (e) {
@@ -110,12 +106,14 @@ export function SectionCards() {
         .catch((error) => console.error("Failed to clear scanner on success match", error));
     }
 
-    // Render the camera interface frame
-    scanner.render(onScanSuccess);
+    function onScanFailure(errorMessage: string) {
+      // Intentionally empty
+    }
 
-    // 4. CLEANUP: When dialog closes or component unmounts, release camera stream!
+    scanner.render(onScanSuccess, onScanFailure);
+
     return () => {
-      scanner.clear().catch((error) => console.error("Failed to clear scanner on teardown", error));
+      scanner.clear().catch((error) => console.error("Failed to clear scanner", error));
     };
   }, [isScannerMounted, isMobile]);
 
