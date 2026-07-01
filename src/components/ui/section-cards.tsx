@@ -31,7 +31,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ReactQRCode } from '@lglab/react-qr-code'
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from "html5-qrcode" // The Camera Engine
+import { Html5QrcodeScanner } from "html5-qrcode" // The Camera Engine
 import React from "react"
 import { isMobile } from 'react-device-detect';
 import { db } from "../../lib/db"
@@ -40,7 +40,6 @@ import { db } from "../../lib/db"
 
 export function SectionCards() {
   // ─── 1. ALL HOOK DECLARATIONS AT THE TOP LEVEL ───
-  const user = db.useUser();
   const { user: authState } = db.useAuth();
 
   // Query hook uses conditional logic inside its argument rather than wrapper blocks
@@ -61,7 +60,7 @@ export function SectionCards() {
   const [balance, setBalance] = useState<number>(0);
 
   // Camera device references
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  //const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const CAMERA_VIEWPORT_ID = "fayd-modal-lens";
 
   // ─── 2. EXTRACT & CALCULATE DERIVED VALUES ───
@@ -97,6 +96,7 @@ export function SectionCards() {
   // ─── 4. HANDLERS AND EVENT MANAGEMENT ───
   const goOnline = () => setIsOnline(true);
   const goOffline = () => setIsOnline(false);
+
 
   const handleAmountChange = (val: string) => {
     setSendAmount(val);
@@ -137,6 +137,7 @@ export function SectionCards() {
   // ─── 6. COMPONENT RENDER OUTPUT (JSX) ───
 
   return (
+
     <div className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-1 @5xl/main:grid-cols-1 dark:*:data-[slot=card]:bg-card">
       <Card className={`p-3 mb-3 ${isOnline ? 'bg-yellow-200' : 'bg-green-200'}`}>
         <CardHeader>
@@ -175,6 +176,8 @@ export function SectionCards() {
               Send
             </button>
           </DialogTrigger>
+          <button className="hidden" onClick={goOnline}>Go Online</button>
+          <button className="hidden" onClick={goOffline}>Go Offline</button>
 
           <DialogContent className="sm:max-w-md bg-white">
             <DialogHeader>
