@@ -241,7 +241,7 @@ export function SectionCards() {
     handleAmountChange(calculated);
   };
 
-  // ─── 4. COUNTER GENERATION AND CRYPTO SIGNING ───
+  // ─── 4. COUNTER GENERATION, BALANCE LOCK, AND CRYPTO SIGNING ───
   const handleConfirmSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (error || !sendAmount || !authState?.id) return;
@@ -250,24 +250,24 @@ export function SectionCards() {
     const timestamp = Date.now();
     const senderId = authState.id;
     const senderBalanceBefore = userBalance;
-    const currentSeq = userSequenceNumber; // Anchor to the exact counter state
+    const currentSeq = userSequenceNumber;
 
     const nonce = Math.random().toString(36).substring(2, 15);
 
+    // 1. Structural Payload for QR generation
     const tokenPayload = {
       app: "FAYD",
       type: `${isOnline ? "ONLINE_PAYMENT" : "OFFLINE_PAYMENT"}`,
       amount: paymentAmount,
       senderId: senderId,
       senderBalanceBefore: senderBalanceBefore,
-      sequenceNumber: currentSeq, // Stamped onto the code matrix
+      sequenceNumber: currentSeq,
       timestamp: timestamp,
       nonce: nonce
     };
 
     try {
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
-      // The cryptographic payload string incorporates the counter context perfectly
       const secretMessage = `${senderId}-${paymentAmount}-${senderBalanceBefore}-${currentSeq}-${timestamp}-${nonce}`;
 
       const encoder = new TextEncoder();
@@ -286,6 +286,15 @@ export function SectionCards() {
       const signatureHex = Array.from(new Uint8Array(signatureBuffer))
         .map(b => b.toString(16).padStart(2, "0"))
         .join("");
+
+      // 2. LOCK FUNDS IMMEDIATELY IN THE DB BEFORE DISPLAYING QR
+      // This prevents double spending locally by changing state the moment the code is minted.
+      await db.transact([
+        db.tx.$users[senderId].update({
+          balance: senderBalanceBefore - paymentAmount,
+          sequenceNumber: currentSeq + 1
+        })
+      ]);
 
       setGeneratedPayload(JSON.stringify({ ...tokenPayload, sig: signatureHex }));
       setSendStep("QR_DISPLAY");
@@ -397,19 +406,16 @@ export function SectionCards() {
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button
-                      variant="outline"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                      variant="default"
                       type="button"
-                      onClick={async () => {
-                        // Increments the sequenceNumber counter locally on completion so that the next generated ticket is unique
-                        await db.transact([
-                          db.tx.$users[authState.id].update({
-                            balance: userBalance - parseFloat(sendAmount),
-                            sequenceNumber: userSequenceNumber + 1
-                          })
-                        ]);
+                      onClick={() => {
+                        // Reset form fields cleanly now that balance logic is pre-committed
+                        setSendAmount("");
+                        setSendStep("FORM_ENTRY");
                       }}
                     >
-                      Done (Deduct Funds)
+                      Close Voucher Window
                     </Button>
                   </DialogClose>
                 </DialogFooter>

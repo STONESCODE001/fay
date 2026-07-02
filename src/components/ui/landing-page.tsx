@@ -65,7 +65,7 @@ export default function LandingPage({ onStartApp }: LandingPageProps) {
             Send and receive payments OFFLINE
           </h1>
           <p className="text-slate-600">
-            Fayd is a peer-to-peer payment application that allows you to send and receive payments without an internet connection.
+            Fayd allows you to send and receive payments without an internet connection.
           </p>
         </div>
 
