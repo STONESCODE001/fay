@@ -1,10 +1,11 @@
-import { IconPlayerRecordFilled, IconInfoOctagonFilled } from "@tabler/icons-react"
+import { IconTrendingDown, IconTrendingUp, IconPlayerRecordFilled, IconInfoOctagonFilled } from "@tabler/icons-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
   CardAction,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardContent,
   CardTitle,
@@ -68,7 +69,6 @@ export function SectionCards() {
   // ─── 2. DERIVED VALUES ───
   const dbUser = data?.$users?.[0];
   const userBalance = dbUser?.balance ?? 0;
-  // Fallback to 0 if the counter hasn't been set yet
   const userSequenceNumber = dbUser?.sequenceNumber ?? 0;
   const recentTransactions = data?.transactions ?? [];
 
@@ -105,20 +105,20 @@ export function SectionCards() {
     }
   }, [userBalance]);
 
-  // ─── 3. INBOUND VOUCHER SCANNING & COUNTER VERIFICATION ───
+  // ─── 3. INBOUND VOUCHER SCANNING & SECURE PROCESSING ───
   const processIncomingVoucher = async (decodedText: string, html5QrCodeInstance: Html5Qrcode) => {
     if (!authState?.id) {
       alert("Authentication error: Please log in again.");
       return;
     }
 
+    // Guard constraint against raw, malformed, or early partial camera frames
+    if (!decodedText.trim().startsWith("{") || !decodedText.includes('"app":"FAYD"')) {
+      return;
+    }
+
     try {
       const parsed = JSON.parse(decodedText);
-
-      if (parsed.app !== "FAYD") {
-        alert("Invalid QR Code: Not a FAYD asset token.");
-        return;
-      }
 
       const twoMinutes = 2 * 60 * 1000;
       if (Date.now() - parsed.timestamp > twoMinutes) {
@@ -126,7 +126,7 @@ export function SectionCards() {
         return;
       }
 
-      // 🛡️ RE-HASH VERIFICATION BLOCK (Now binding the unique sequence counter into the cipher message)
+      // Cryptographic Validation Check
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
       const secretMessage = `${parsed.senderId}-${parsed.amount}-${parsed.senderBalanceBefore}-${parsed.sequenceNumber}-${parsed.timestamp}-${parsed.nonce}`;
 
@@ -153,37 +153,18 @@ export function SectionCards() {
         return;
       }
 
-      if (parsed.senderBalanceBefore < parsed.amount) {
-        alert("Transaction Declined: Sender has insufficient certified funds.");
-        return;
-      }
-
       await html5QrCodeInstance.stop();
-      const txId = crypto.randomUUID();
 
-      // Process double-sided transaction matrix natively 
+      // EXECUTE ESCROW ACCEPTANCE MUTATION (Updates receiver wallet and clears conditional state safely)
       await db.transact([
-        // Credit the receiver
         db.tx.$users[authState.id].update({
           balance: userBalance + parsed.amount
         }),
-        // Force debit the sender in the cloud array instantly
-        db.tx.$users[parsed.senderId].update({
-          balance: parsed.senderBalanceBefore - parsed.amount
+        db.tx.transactions[parsed.txId].update({
+          status: "completed",
+          type: "OFFLINE_PAYMENT"
         }),
-        // Register transaction with tracking variables
-        db.tx.transactions[txId].update({
-          amount: parsed.amount,
-          type: parsed.type,
-          status: isOnline ? "completed" : "pending_sync",
-          senderBalanceBefore: parsed.senderBalanceBefore,
-          senderBalanceAfter: parsed.senderBalanceBefore - parsed.amount,
-          sequenceNumber: parsed.sequenceNumber, // Captured for post-sync clash protection
-          nonce: `tx_${parsed.nonce}`,
-          timestamp: Date.now()
-        }),
-        db.tx.transactions[txId].link({ sender: parsed.senderId }),
-        db.tx.transactions[txId].link({ receiver: authState.id })
+        db.tx.transactions[parsed.txId].link({ receiver: authState.id })
       ]);
 
       alert(`✅ Successfully processed ₦${parsed.amount}!`);
@@ -191,7 +172,6 @@ export function SectionCards() {
 
     } catch (e) {
       console.error(e);
-      alert("Error parsing standard FAYD transactional payload structure.");
     }
   };
 
@@ -203,7 +183,7 @@ export function SectionCards() {
       if (!element) return;
 
       const html5QrCode = new Html5Qrcode(CAMERA_VIEWPORT_ID);
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      const config = { fps: 15, qrbox: { width: 250, height: 250 } };
 
       html5QrCode.start(
         { facingMode: "environment" },
@@ -241,7 +221,7 @@ export function SectionCards() {
     handleAmountChange(calculated);
   };
 
-  // ─── 4. COUNTER GENERATION, BALANCE LOCK, AND CRYPTO SIGNING ───
+  // ─── 4. COUNTER GENERATION, CONDITIONAL DEBIT HOLD, AND SIGNING ───
   const handleConfirmSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (error || !sendAmount || !authState?.id) return;
@@ -251,20 +231,8 @@ export function SectionCards() {
     const senderId = authState.id;
     const senderBalanceBefore = userBalance;
     const currentSeq = userSequenceNumber;
-
+    const targetTxId = crypto.randomUUID(); // Predetermined shared transaction entity ID
     const nonce = Math.random().toString(36).substring(2, 15);
-
-    // 1. Structural Payload for QR generation
-    const tokenPayload = {
-      app: "FAYD",
-      type: `${isOnline ? "ONLINE_PAYMENT" : "OFFLINE_PAYMENT"}`,
-      amount: paymentAmount,
-      senderId: senderId,
-      senderBalanceBefore: senderBalanceBefore,
-      sequenceNumber: currentSeq,
-      timestamp: timestamp,
-      nonce: nonce
-    };
 
     try {
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
@@ -287,16 +255,39 @@ export function SectionCards() {
         .map(b => b.toString(16).padStart(2, "0"))
         .join("");
 
-      // 2. LOCK FUNDS IMMEDIATELY IN THE DB BEFORE DISPLAYING QR
-      // This prevents double spending locally by changing state the moment the code is minted.
+      const tokenPayload = {
+        app: "FAYD",
+        type: "OFFLINE_PAYMENT",
+        txId: targetTxId,
+        amount: paymentAmount,
+        senderId: senderId,
+        senderBalanceBefore: senderBalanceBefore,
+        sequenceNumber: currentSeq,
+        timestamp: timestamp,
+        nonce: nonce,
+        sig: signatureHex
+      };
+
+      // COMMIT THE CONDITIONAL HOLD INSTANTLY ON SENDER NODE
       await db.transact([
         db.tx.$users[senderId].update({
           balance: senderBalanceBefore - paymentAmount,
           sequenceNumber: currentSeq + 1
-        })
+        }),
+        db.tx.transactions[targetTxId].update({
+          amount: paymentAmount,
+          type: "OFFLINE_PAYMENT",
+          status: "conditional", // UI displays this as a dynamic conditional hold status
+          senderBalanceBefore: senderBalanceBefore,
+          senderBalanceAfter: senderBalanceBefore - paymentAmount,
+          sequenceNumber: currentSeq,
+          nonce: `tx_${nonce}`,
+          timestamp: timestamp
+        }),
+        db.tx.transactions[targetTxId].link({ sender: senderId })
       ]);
 
-      setGeneratedPayload(JSON.stringify({ ...tokenPayload, sig: signatureHex }));
+      setGeneratedPayload(JSON.stringify(tokenPayload));
       setSendStep("QR_DISPLAY");
     } catch (err) {
       console.error(err);
@@ -322,7 +313,7 @@ export function SectionCards() {
         <CardHeader>
           <CardDescription>Balance</CardDescription>
           <CardTitle className="text-2xl font-extrabold tabular-nums @[250px]/card:text-3xl">
-            ₦{balance}
+            ₦{balance.toFixed(2)}
           </CardTitle>
           <CardAction>
             <Badge className={isOnline ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}>
@@ -410,7 +401,6 @@ export function SectionCards() {
                       variant="default"
                       type="button"
                       onClick={() => {
-                        // Reset form fields cleanly now that balance logic is pre-committed
                         setSendAmount("");
                         setSendStep("FORM_ENTRY");
                       }}
@@ -492,10 +482,12 @@ export function SectionCards() {
                           className={
                             tx.status === "completed"
                               ? "bg-green-50 text-green-700 hover:bg-green-50 border border-green-200"
-                              : "bg-amber-50 text-amber-700 hover:bg-amber-50 border border-amber-200"
+                              : tx.status === "conditional"
+                                ? "bg-blue-50 text-blue-700 hover:bg-blue-50 border border-blue-200"
+                                : "bg-amber-50 text-amber-700 hover:bg-amber-50 border border-amber-200"
                           }
                         >
-                          {tx.status === "completed" ? "Completed" : "Sync Pending"}
+                          {tx.status === "completed" ? "Completed" : tx.status === "conditional" ? "Conditional Hold" : "Sync Pending"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
