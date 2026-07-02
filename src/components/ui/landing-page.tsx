@@ -1,5 +1,7 @@
 
 import { db } from "../../lib/db"
+import myLogo from '../../assets/FAY_LOGO.png';
+import myLogoNoBg from '../../assets/FAY_LOGO_NOBG.png'
 
 interface LandingPageProps {
   onStartApp: () => void
@@ -56,7 +58,7 @@ export default function LandingPage({ onStartApp }: LandingPageProps) {
     <main className="min-h-svh bg-slate-50 text-slate-900">
       <section id="center" className="mx-auto flex min-h-svh max-w-5xl flex-col items-center justify-center gap-6 px-4 py-8">
         <div className="hero relative">
-
+          <img src={myLogo} alt="FAY_LOGO" width="200" />
         </div>
 
         <div className="space-y-2 text-center">
@@ -64,7 +66,7 @@ export default function LandingPage({ onStartApp }: LandingPageProps) {
             Send and receive payments OFFLINE
           </h1>
           <p className="text-slate-600">
-            Cryptographic vouchers, local ledger, zero network required.
+            Fayd is a peer-to-peer payment application that allows you to send and receive payments without an internet connection.
           </p>
         </div>
 

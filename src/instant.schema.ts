@@ -27,6 +27,7 @@ const _schema = i.schema({
       senderBalanceBefore: i.number(),  // Tracks cryptographically signed snapshot
       senderBalanceAfter: i.number(),   // Remaining wallet balance post-transaction
       nonce: i.string(),                // Unique transaction ID flag
+      sequenceNumber: i.number(),
       timestamp: i.number().indexed(),  // Chronological sorting key
       rawPayload: i.string().optional(),// Crypto string packet (if offline)
     }),
