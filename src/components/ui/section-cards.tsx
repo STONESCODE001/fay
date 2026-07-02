@@ -1,11 +1,10 @@
-import { IconTrendingDown, IconTrendingUp, IconPlayerRecordFilled, IconInfoOctagonFilled } from "@tabler/icons-react"
+import { IconPlayerRecordFilled, IconInfoOctagonFilled } from "@tabler/icons-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
   CardAction,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardContent,
   CardTitle,

@@ -1,7 +1,6 @@
 
 import { db } from "../../lib/db"
 import myLogo from '../../assets/FAY_LOGO.png';
-import myLogoNoBg from '../../assets/FAY_LOGO_NOBG.png'
 
 interface LandingPageProps {
   onStartApp: () => void
