@@ -39,6 +39,7 @@ export function SectionCards() {
   // ─── 1. HOOK DECLARATIONS ───
   const { user: authState } = db.useAuth();
 
+  // Unified Query Hook: ONLY fetches transactions involving THIS specific user
   const { data, isLoading } = db.useQuery(
     authState
       ? {
@@ -47,8 +48,8 @@ export function SectionCards() {
           $: {
             where: {
               or: [
-                { "sender.id": authState.id },
-                { "receiver.id": authState.id }
+                { "sender": authState.id },
+                { "receiver": authState.id }
               ]
             },
             order: { timestamp: "desc" },
