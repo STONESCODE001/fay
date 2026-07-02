@@ -45,6 +45,12 @@ export function SectionCards() {
         $users: { $: { where: { id: authState.id } } },
         transactions: {
           $: {
+            where: {
+              or: [
+                { "sender.id": authState.id },
+                { "receiver.id": authState.id }
+              ]
+            },
             order: { timestamp: "desc" },
             limit: 10
           },
@@ -297,6 +303,24 @@ export function SectionCards() {
   if (!authState) return null;
   if (isLoading) return <div>Loading balance...</div>;
 
+  // ─── CANCEL ACCIDENTAL / TEST TRANSACTIONS ───
+  const cancelTransaction = async (txId: string, amount: number) => {
+    if (!authState?.id) return;
+
+    // Refund the balance and wipe out the conditional transaction entity
+    await db.transact([
+      db.tx.$users[authState.id].update({
+        balance: userBalance + amount
+      }),
+      db.tx.transactions[txId].delete()
+    ]);
+
+    // Reset any open UI forms
+    setSendAmount("");
+    setSendStep("FORM_ENTRY");
+    alert("Transaction voided. Funds successfully returned to your balance.");
+  };
+
   return (
     <div className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 dark:*:data-[slot=card]:bg-card">
       <Card className={`p-3 mb-3 ${isOnline ? 'bg-yellow-200' : 'bg-green-200'}`}>
@@ -470,24 +494,44 @@ export function SectionCards() {
                 </TableRow>
               ) : (
                 recentTransactions.map((tx: any) => {
-                  const isSent = tx.sender?.id === authState.id;
+                  // Guard checking: fallback safely if relationships are still syncing offline
+                  const senderId = tx.sender?.id || null;
+                  const receiverId = tx.receiver?.id || null;
+
+                  const isSent = senderId === authState.id;
+                  const isReceived = receiverId === authState.id;
+
+                  // If this transaction doesn't belong to the user, hide it completely
+                  if (!isSent && !isReceived) return null;
+
                   return (
                     <TableRow key={tx.id}>
                       <TableCell className="font-mono text-xs max-w-[120px] truncate font-medium">
                         {tx.nonce || tx.id.substring(0, 8)}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          className={
-                            tx.status === "completed"
-                              ? "bg-green-50 text-green-700 hover:bg-green-50 border border-green-200"
-                              : tx.status === "conditional"
-                                ? "bg-blue-50 text-blue-700 hover:bg-blue-50 border border-blue-200"
-                                : "bg-amber-50 text-amber-700 hover:bg-amber-50 border border-amber-200"
-                          }
-                        >
-                          {tx.status === "completed" ? "Completed" : tx.status === "conditional" ? "Conditional Hold" : "Sync Pending"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            className={
+                              tx.status === "completed"
+                                ? "bg-green-50 text-green-700 border-green-200"
+                                : tx.status === "conditional"
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-amber-50 text-amber-700 border-amber-200"
+                            }
+                          >
+                            {tx.status === "completed" ? "Completed" : tx.status === "conditional" ? "Conditional Hold" : "Sync Pending"}
+                          </Badge>
+
+                          {tx.status === "conditional" && isSent && (
+                            <button
+                              onClick={() => cancelTransaction(tx.id, tx.amount)}
+                              className="text-[10px] bg-red-50 text-red-600 hover:bg-red-100 px-2 py-0.5 rounded border border-red-200 font-bold uppercase tracking-wider"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
                         {tx.type ? tx.type.replace("_", " ") : "P2P CASH"}
