@@ -38,15 +38,21 @@ export function SectionCards() {
   // ─── 1. HOOK DECLARATIONS ───
   const { user: authState } = db.useAuth();
 
-  // Unified Query Hook: Safe for client-side evaluation without strict database or-relational blocks
+  // Unified Query Hook: ONLY fetches transactions involving THIS specific user
   const { data, isLoading } = db.useQuery(
     authState
       ? {
         $users: { $: { where: { id: authState.id } } },
         transactions: {
           $: {
+            where: {
+              or: [
+                { "sender": authState.id },
+                { "receiver": authState.id }
+              ]
+            },
             order: { timestamp: "desc" },
-            limit: 15
+            limit: 10
           },
           sender: {},
           receiver: {}
@@ -65,7 +71,7 @@ export function SectionCards() {
   const [balance, setBalance] = useState<number>(0);
   const CAMERA_VIEWPORT_ID = "fayd-modal-lens";
 
-  // Active Transaction IDs Tracking for Cancel Cooldown Blocks
+  // Active Transaction IDs and Real-Time Delay Controls for Locking Accidental Cancels
   const [activeTxId, setActiveTxId] = useState<string | null>(null);
   const [cancelCountdown, setCancelCountdown] = useState<number>(0);
 
@@ -79,7 +85,7 @@ export function SectionCards() {
   const connectionStatus = db.useConnectionStatus();
   const priorConnectionState = useRef<boolean | null>(null);
 
-  // Network Telemetry & Connectivity Polling Thread
+  // Connection Polling Thread
   useEffect(() => {
     const verifyActualConnectivity = async () => {
       try {
@@ -104,7 +110,7 @@ export function SectionCards() {
     return () => clearInterval(pingInterval);
   }, [connectionStatus]);
 
-  // 🎯 AUTOMATIC NETWORK RECOVERY FLUSH
+  // 🎯 AUTOMATIC NETWORK RECOVERY RELOAD TRIGGER
   useEffect(() => {
     if (priorConnectionState.current === false && isOnline === true) {
       window.location.reload();
@@ -118,7 +124,7 @@ export function SectionCards() {
     }
   }, [userBalance]);
 
-  // Real-time interval countdown tracking for locking cancel badges
+  // Cooldown tracker timer loop
   useEffect(() => {
     if (cancelCountdown <= 0) return;
     const timer = setTimeout(() => {
@@ -147,6 +153,7 @@ export function SectionCards() {
         return;
       }
 
+      // Cryptographic Validation Check
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
       const secretMessage = `${parsed.senderId}-${parsed.amount}-${parsed.senderBalanceBefore}-${parsed.sequenceNumber}-${parsed.timestamp}-${parsed.nonce}`;
 
@@ -173,33 +180,50 @@ export function SectionCards() {
         return;
       }
 
-      // 🎯 RELEASE HARDWARE SCANNER INSTANTLY BEFORE THE BLOCKING ALERT INTERRUPTS
+      // 🎯 FORCE STOP CAMERA INSTANTLY BEFORE BLOCKING ALERTS INTERRUPT RENDERING
       try {
         await html5QrCodeInstance.stop();
       } catch (err) {
-        console.error("Camera release error: ", err);
+        console.error("Camera release mismatch:", err);
       }
       setIsScannerMounted(false);
 
-      // 🎯 BULLETPROOF OFFLINE-TO-OFFLINE FIX: Declare full database entity schema values 
-      // locally so the receiver builds a perfect mirror record without server communication!
-      db.transact([
-        db.tx.$users[authState.id].update({
-          balance: userBalance + parsed.amount
-        }),
-        db.tx.transactions[parsed.txId].update({
-          amount: parsed.amount,
-          type: "OFFLINE_PAYMENT",
-          status: "completed",
-          senderBalanceBefore: parsed.senderBalanceBefore,
-          senderBalanceAfter: parsed.senderBalanceBefore - parsed.amount,
-          sequenceNumber: parsed.sequenceNumber,
-          nonce: parsed.nonce,
-          timestamp: parsed.timestamp
-        }),
-        db.tx.transactions[parsed.txId].link({ receiver: authState.id }),
-        db.tx.transactions[parsed.txId].link({ sender: parsed.senderId })
-      ]);
+      // 🎯 UNIVERSAL PERMISSIONS FIX: Check local cache first
+      const existingTx = recentTransactions.find((t: any) => t.id === parsed.txId);
+
+      if (existingTx) {
+        // 🟢 PATH A (ONLINE-TO-ONLINE): Transaction exists. Avoid modifying keys you don't own!
+        // Simply update transaction status and link yourself as the receiver.
+        await db.transact([
+          db.tx.$users[authState.id].update({
+            balance: userBalance + parsed.amount
+          }),
+          db.tx.transactions[parsed.txId].update({
+            status: "completed"
+          }),
+          db.tx.transactions[parsed.txId].link({ receiver: authState.id })
+        ]);
+      } else {
+        // 🟡 PATH B (OFFLINE-TO-OFFLINE): Transaction record is completely missing from cache. 
+        // Safely build out the local entity structure so your UI increments balance flawlessly.
+        await db.transact([
+          db.tx.$users[authState.id].update({
+            balance: userBalance + parsed.amount
+          }),
+          db.tx.transactions[parsed.txId].update({
+            amount: parsed.amount,
+            type: "OFFLINE_PAYMENT",
+            status: "completed",
+            senderBalanceBefore: parsed.senderBalanceBefore,
+            senderBalanceAfter: parsed.senderBalanceBefore - parsed.amount,
+            sequenceNumber: parsed.sequenceNumber,
+            nonce: parsed.nonce,
+            timestamp: parsed.timestamp
+          }),
+          db.tx.transactions[parsed.txId].link({ receiver: authState.id }),
+          db.tx.transactions[parsed.txId].link({ sender: parsed.senderId })
+        ]);
+      }
 
       alert(`✅ Successfully processed ₦${parsed.amount}!`);
 
@@ -235,7 +259,7 @@ export function SectionCards() {
         activeEngine.stop().catch((err: any) => console.error(err));
       }
     };
-  }, [isScannerMounted, userBalance, isOnline]);
+  }, [isScannerMounted, userBalance, isOnline, recentTransactions]);
 
   const handleAmountChange = (val: string) => {
     setSendAmount(val);
@@ -301,8 +325,7 @@ export function SectionCards() {
         sig: signatureHex
       };
 
-      // COMMIT THE CONDITIONAL HOLD OPTIMISTICALLY WITHOUT AWAIT BLOCKS
-      db.transact([
+      await db.transact([
         db.tx.$users[senderId].update({
           balance: senderBalanceBefore - paymentAmount,
           sequenceNumber: currentSeq + 1
@@ -320,7 +343,7 @@ export function SectionCards() {
         db.tx.transactions[targetTxId].link({ sender: senderId })
       ]);
 
-      // Initialize cooling parameters
+      // Trigger cancel button countdown locks
       setActiveTxId(targetTxId);
       setCancelCountdown(20);
 
@@ -338,7 +361,7 @@ export function SectionCards() {
   const cancelTransaction = async (txId: string, amount: number) => {
     if (!authState?.id) return;
 
-    db.transact([
+    await db.transact([
       db.tx.$users[authState.id].update({
         balance: userBalance + amount
       }),
@@ -511,67 +534,69 @@ export function SectionCards() {
                   </TableCell>
                 </TableRow>
               ) : (
-                recentTransactions
-                  // 🎯 CLIENT-SIDE PRIVACY FILTER: Safe array mapping for complete offline stability
-                  .filter((tx: any) => {
-                    const sId = tx.sender?.id || null;
-                    const rId = tx.receiver?.id || null;
-                    return sId === authState.id || rId === authState.id;
-                  })
-                  .map((tx: any) => {
-                    const senderId = tx.sender?.id || null;
-                    const isSent = senderId === authState.id;
+                recentTransactions.map((tx: any) => {
+                  const senderId = tx.sender?.id || null;
+                  const receiverId = tx.receiver?.id || null;
 
-                    return (
-                      <TableRow key={tx.id}>
-                        <TableCell className="font-mono text-xs max-w-[120px] truncate font-medium">
-                          {tx.nonce || tx.id.substring(0, 8)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              className={
-                                tx.status === "completed"
-                                  ? "bg-green-50 text-green-700 border-green-200"
-                                  : tx.status === "conditional"
-                                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                                    : "bg-amber-50 text-amber-700 border-amber-200"
-                              }
-                            >
-                              {tx.status === "completed" ? "Completed" : tx.status === "conditional" ? "Conditional Hold" : "Sync Pending"}
-                            </Badge>
+                  const isSent = senderId === authState.id;
+                  const isReceived = receiverId === authState.id;
 
-                            {/* ⏳ ENFORCED COOLDOWN TIMER AT HOLD INTERACTIVE BADGES */}
-                            {tx.status === "conditional" && isSent && (
-                              cancelCountdown > 0 && activeTxId === tx.id ? (
-                                <span className="text-[10px] text-gray-400 px-2 py-0.5 font-semibold font-mono">
-                                  Cancel in 0:{(cancelCountdown < 10 ? "0" : "") + cancelCountdown}
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => cancelTransaction(tx.id, tx.amount)}
-                                  className="text-[10px] bg-red-50 text-red-600 hover:bg-red-100 px-2 py-0.5 rounded border border-red-200 font-bold uppercase tracking-wider animate-pulse"
-                                >
-                                  Cancel
-                                </button>
-                              )
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-                          {tx.type ? tx.type.replace("_", " ") : "P2P CASH"}
-                        </TableCell>
-                        <TableCell className={`text-right font-bold tabular-nums ${isSent ? "text-red-600" : "text-emerald-600"}`}>
-                          {isSent ? "-" : "+"}₦{typeof tx.amount === 'number' ? tx.amount.toFixed(2) : "0.00"}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
+                  if (!isSent && !isReceived) return null;
+
+                  // Infer dynamic completion safely for pure frontend visual consistency
+                  const hasReceiver = !!receiverId || !!tx.receiver;
+                  const displayStatus = tx.status === "conditional" && hasReceiver ? "completed" : tx.status;
+
+                  return (
+                    <TableRow key={tx.id}>
+                      <TableCell className="font-mono text-xs max-w-[120px] truncate font-medium">
+                        {tx.nonce || tx.id.substring(0, 8)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            className={
+                              displayStatus === "completed"
+                                ? "bg-green-50 text-green-700 border-green-200"
+                                : displayStatus === "conditional"
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-amber-50 text-amber-700 border-amber-200"
+                            }
+                          >
+                            {displayStatus === "completed" ? "Completed" : displayStatus === "conditional" ? "Conditional Hold" : "Sync Pending"}
+                          </Badge>
+
+                          {/* ⏳ LOCK-TIME COOLDOWN COUNTER COMPONENT */}
+                          {displayStatus === "conditional" && isSent && (
+                            cancelCountdown > 0 && activeTxId === tx.id ? (
+                              <span className="text-[10px] text-gray-400 px-2 py-0.5 font-semibold font-mono">
+                                Cancel in 0:{(cancelCountdown < 10 ? "0" : "") + cancelCountdown}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => cancelTransaction(tx.id, tx.amount)}
+                                className="text-[10px] bg-red-50 text-red-600 hover:bg-red-100 px-2 py-0.5 rounded border border-red-200 font-bold uppercase tracking-wider"
+                              >
+                                Cancel
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
+                        {tx.type ? tx.type.replace("_\", \" ") : "P2P CASH"}
+                      </TableCell>
+                      <TableCell className={`text-right font-bold tabular-nums ${isSent ? "text-red-600" : "text-emerald-600"}`}>
+                        {isSent ? "-" : "+"}₦{typeof tx.amount === 'number' ? tx.amount.toFixed(2) : "0.00"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

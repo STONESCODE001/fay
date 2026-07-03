@@ -19,6 +19,16 @@ const rules = {
    *   bind: ["isOwner", "auth.id != null && auth.id == data.ownerId"],
    * },
    */
+
+  "transactions": {
+    "allow": {
+      "view": "auth != null",
+      "create": "auth != null",
+      "update": "auth != null",
+      "delete": "auth != null"
+    }
+
+  }
 } satisfies InstantRules;
 
 export default rules;
