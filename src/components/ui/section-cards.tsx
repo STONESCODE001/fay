@@ -32,7 +32,6 @@ import {
 import { ReactQRCode } from '@lglab/react-qr-code'
 import { Html5Qrcode } from "html5-qrcode"
 import React from "react"
-import { isMobile } from 'react-device-detect';
 import { db } from "../../lib/db"
 
 export function SectionCards() {
@@ -181,8 +180,9 @@ export function SectionCards() {
     }
   };
 
+  // REMOVED `isMobile` check from mounting block to support local sandbox debugging safely
   useEffect(() => {
-    if (!isScannerMounted || !isMobile) return;
+    if (!isScannerMounted) return;
 
     const timeoutId = setTimeout(() => {
       const element = document.getElementById(CAMERA_VIEWPORT_ID);
@@ -208,7 +208,7 @@ export function SectionCards() {
         activeEngine.stop().catch((err: any) => console.error(err));
       }
     };
-  }, [isScannerMounted, isMobile, userBalance, isOnline]);
+  }, [isScannerMounted, userBalance, isOnline]);
 
   const handleAmountChange = (val: string) => {
     setSendAmount(val);
@@ -445,32 +445,20 @@ export function SectionCards() {
             </button>
           </DialogTrigger>
 
-          {!isMobile ? (
-            <DialogContent className="bg-white">
-              <DialogHeader>
-                <DialogTitle>Camera Scanning Unavailable</DialogTitle>
-                <DialogDescription>Camera Scanning is only available on mobile devices.</DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <DialogClose asChild><Button variant="outline">Close Window</Button></DialogClose>
-              </DialogFooter>
-            </DialogContent>
-          ) : (
-            <DialogContent className="bg-white">
-              <DialogHeader>
-                <DialogTitle>Scan Inbound Code</DialogTitle>
-                <DialogDescription>Align the targeting viewport box over the sender's voucher code.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 my-2">
-                <div className="bg-slate-50 border border-slate-200 p-2 rounded-2xl overflow-hidden shadow-inner">
-                  <div id={CAMERA_VIEWPORT_ID} className="w-full font-sans overflow-hidden rounded-xl"></div>
-                </div>
+          <DialogContent className="bg-white">
+            <DialogHeader>
+              <DialogTitle>Scan Inbound Code</DialogTitle>
+              <DialogDescription>Align the targeting viewport box over the sender's voucher code.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 my-2">
+              <div className="bg-slate-50 border border-slate-200 p-2 rounded-2xl overflow-hidden shadow-inner">
+                <div id={CAMERA_VIEWPORT_ID} className="w-full font-sans overflow-hidden rounded-xl"></div>
               </div>
-              <DialogFooter>
-                <DialogClose asChild><Button variant="outline">Close Camera Lens</Button></DialogClose>
-              </DialogFooter>
-            </DialogContent>
-          )}
+            </div>
+            <DialogFooter>
+              <DialogClose asChild><Button variant="outline">Close Camera Lens</Button></DialogClose>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
       </div>
 
@@ -495,14 +483,12 @@ export function SectionCards() {
                 </TableRow>
               ) : (
                 recentTransactions.map((tx: any) => {
-                  // Guard checking: fallback safely if relationships are still syncing offline
                   const senderId = tx.sender?.id || null;
                   const receiverId = tx.receiver?.id || null;
 
                   const isSent = senderId === authState.id;
                   const isReceived = receiverId === authState.id;
 
-                  // If this transaction doesn't belong to the user, hide it completely
                   if (!isSent && !isReceived) return null;
 
                   return (
