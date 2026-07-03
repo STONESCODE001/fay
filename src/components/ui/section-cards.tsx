@@ -337,7 +337,7 @@ export function SectionCards() {
         <CardHeader>
           <CardDescription>Balance</CardDescription>
           <CardTitle className="text-2xl font-extrabold tabular-nums @[250px]/card:text-3xl">
-            ₦{balance.toFixed(2)}
+            ₦{(balance ?? 0).toFixed(2)}
           </CardTitle>
           <CardAction>
             <Badge className={isOnline ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}>
@@ -372,7 +372,7 @@ export function SectionCards() {
               <form onSubmit={handleConfirmSend} className="space-y-4 my-2">
                 <div className="flex justify-between items-center text-xs text-gray-500 px-1">
                   <span>Available Balance</span>
-                  <span className="font-semibold text-gray-700">₦{balance.toFixed(2)}</span>
+                  <span className="font-semibold text-gray-700">₦{(balance ?? 0).toFixed(2)}</span>
                 </div>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-medium text-gray-400">₦</span>
@@ -524,7 +524,7 @@ export function SectionCards() {
                         {tx.type ? tx.type.replace("_", " ") : "P2P CASH"}
                       </TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${isSent ? "text-red-600" : "text-emerald-600"}`}>
-                        {isSent ? "-" : "+"}₦{tx.amount.toFixed(2)}
+                        {isSent ? "-" : "+"}₦{typeof tx.amount === 'number' ? tx.amount.toFixed(2) : "0.00"}
                       </TableCell>
                     </TableRow>
                   );
