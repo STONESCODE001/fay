@@ -389,39 +389,4 @@ export function SectionCards() {
 
 
 
-
-[
-  {
-    "id": "ec38d888-5dea-4cf2-b470-3952258b406e",
-    "amount": 50,
-    "nonce": "tx_du2yt2qo2xu",
-    "senderBalanceAfter": 10450,
-    "senderBalanceBefore": 10500,
-    "sequenceNumber": 4,
-    "status": "conditional",
-    "timestamp": 1782990962786,
-    "type": "OFFLINE_PAYMENT"
-  },
-  {
-    "id": "852b696a-3b9a-4bc9-a85c-546532772c9c",
-    "amount": 200,
-    "nonce": "tx_mwf9p7eecz",
-    "senderBalanceAfter": 10250,
-    "senderBalanceBefore": 10450,
-    "sequenceNumber": 5,
-    "status": "completed",
-    "timestamp": 1782995700246,
-    "type": "OFFLINE_PAYMENT"
-  },
-  {
-    "id": "a846b582-144a-445c-b86e-66fa8fe15a3b",
-    "amount": 2000,
-    "nonce": "tx_gtmgpazrygj",
-    "senderBalanceAfter": 8250,
-    "senderBalanceBefore": 10250,
-    "sequenceNumber": 6,
-    "status": "conditional",
-    "timestamp": 1782995855522,
-    "type": "OFFLINE_PAYMENT"
-  }
-]
+check for the device 

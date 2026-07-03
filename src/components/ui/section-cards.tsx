@@ -161,8 +161,8 @@ export function SectionCards() {
 
       await html5QrCodeInstance.stop();
 
-      // EXECUTE ESCROW ACCEPTANCE MUTATION (Optimistically fires locally first)
-      db.transact([
+      // EXECUTE ESCROW ACCEPTANCE MUTATION (Updates receiver wallet and clears conditional state safely)
+      await db.transact([
         db.tx.$users[authState.id].update({
           balance: userBalance + parsed.amount
         }),
@@ -237,7 +237,7 @@ export function SectionCards() {
     const senderId = authState.id;
     const senderBalanceBefore = userBalance;
     const currentSeq = userSequenceNumber;
-    const targetTxId = crypto.randomUUID();
+    const targetTxId = crypto.randomUUID(); // Predetermined shared transaction entity ID
     const nonce = Math.random().toString(36).substring(2, 15);
 
     try {
@@ -274,8 +274,8 @@ export function SectionCards() {
         sig: signatureHex
       };
 
-      // 🔥 REMOVED await: Fire mutation directly into local cache to prevent offline timeout crashes
-      db.transact([
+      // COMMIT THE CONDITIONAL HOLD INSTANTLY ON SENDER NODE
+      await db.transact([
         db.tx.$users[senderId].update({
           balance: senderBalanceBefore - paymentAmount,
           sequenceNumber: currentSeq + 1
@@ -283,7 +283,7 @@ export function SectionCards() {
         db.tx.transactions[targetTxId].update({
           amount: paymentAmount,
           type: "OFFLINE_PAYMENT",
-          status: "conditional",
+          status: "conditional", // UI displays this as a dynamic conditional hold status
           senderBalanceBefore: senderBalanceBefore,
           senderBalanceAfter: senderBalanceBefore - paymentAmount,
           sequenceNumber: currentSeq,
@@ -308,13 +308,15 @@ export function SectionCards() {
   const cancelTransaction = async (txId: string, amount: number) => {
     if (!authState?.id) return;
 
-    db.transact([
+    // Refund the balance and wipe out the conditional transaction entity
+    await db.transact([
       db.tx.$users[authState.id].update({
         balance: userBalance + amount
       }),
       db.tx.transactions[txId].delete()
     ]);
 
+    // Reset any open UI forms
     setSendAmount("");
     setSendStep("FORM_ENTRY");
     alert("Transaction voided. Funds successfully returned to your balance.");
@@ -443,20 +445,32 @@ export function SectionCards() {
             </button>
           </DialogTrigger>
 
-          <DialogContent className="bg-white">
-            <DialogHeader>
-              <DialogTitle>Scan Inbound Code</DialogTitle>
-              <DialogDescription>Align the targeting viewport box over the sender's voucher code.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 my-2">
-              <div className="bg-slate-50 border border-slate-200 p-2 rounded-2xl overflow-hidden shadow-inner">
-                <div id={CAMERA_VIEWPORT_ID} className="w-full font-sans overflow-hidden rounded-xl"></div>
+          {!isMobile ? (
+            <DialogContent className="bg-white">
+              <DialogHeader>
+                <DialogTitle>Camera Scanning Unavailable</DialogTitle>
+                <DialogDescription>Camera Scanning is only available on mobile devices.</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose asChild><Button variant="outline">Close Window</Button></DialogClose>
+              </DialogFooter>
+            </DialogContent>
+          ) : (
+            <DialogContent className="bg-white">
+              <DialogHeader>
+                <DialogTitle>Scan Inbound Code</DialogTitle>
+                <DialogDescription>Align the targeting viewport box over the sender's voucher code.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 my-2">
+                <div className="bg-slate-50 border border-slate-200 p-2 rounded-2xl overflow-hidden shadow-inner">
+                  <div id={CAMERA_VIEWPORT_ID} className="w-full font-sans overflow-hidden rounded-xl"></div>
+                </div>
               </div>
-            </div>
-            <DialogFooter>
-              <DialogClose asChild><Button variant="outline">Close Camera Lens</Button></DialogClose>
-            </DialogFooter>
-          </DialogContent>
+              <DialogFooter>
+                <DialogClose asChild><Button variant="outline">Close Camera Lens</Button></DialogClose>
+              </DialogFooter>
+            </DialogContent>
+          )}
         </Dialog>
       </div>
 
@@ -481,12 +495,14 @@ export function SectionCards() {
                 </TableRow>
               ) : (
                 recentTransactions.map((tx: any) => {
+                  // Guard checking: fallback safely if relationships are still syncing offline
                   const senderId = tx.sender?.id || null;
                   const receiverId = tx.receiver?.id || null;
 
                   const isSent = senderId === authState.id;
                   const isReceived = receiverId === authState.id;
 
+                  // If this transaction doesn't belong to the user, hide it completely
                   if (!isSent && !isReceived) return null;
 
                   return (
@@ -533,5 +549,5 @@ export function SectionCards() {
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }
