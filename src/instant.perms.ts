@@ -22,12 +22,11 @@ const rules = {
 
   "transactions": {
     "allow": {
-      "view": "auth != null",
-      "create": "auth != null",
-      "update": "auth != null",
-      "delete": "auth != null"
+      "view": "auth.id != null",
+      "create": "auth.id != null",
+      "update": "auth.id != null",
+      "delete": "auth.id != null"
     }
-
   }
 } satisfies InstantRules;
 

@@ -1,48 +1,54 @@
 // Docs: https://www.instantdb.com/docs/modeling-data
 
-import { i } from "@instantdb/react";
+import { i } from "@instantdb/core";
 
 const _schema = i.schema({
   entities: {
-    // 1. Extend the built-in System User collection
     $users: i.entity({
-      // Email is a default system field, we keep it optional since we use Guest Auth
       email: i.string().unique().indexed().optional(),
-
-      // --- Our Custom Financial Wallet Fields ---
-      balance: i.number().optional(),             // Main online wallet balance
-
-      // --- Our Offline Security Fields ---
+      balance: i.number().optional(),
       voucherMaxBalance: i.number().optional(),   // Safe offline spending ceiling
       sequenceNumber: i.number().optional(),      // Anti-replay sync counter
       expiresAt: i.number().optional(),           // Offline ticket expiration timestamp
       serverSignature: i.string().optional(),     // Server mathematical watermark
     }),
-
-    // 2. Real-Time Transaction Ledger
     transactions: i.entity({
       amount: i.number(),
-      type: i.string(),                 // "ONLINE_PAYMENT" or "OFFLINE_PAYMENT"
-      status: i.string(),               // "completed", "pending_sync", or "failed"
-      senderBalanceBefore: i.number(),  // Tracks cryptographically signed snapshot
-      senderBalanceAfter: i.number(),   // Remaining wallet balance post-transaction
-      nonce: i.string(),                // Unique transaction ID flag
+      type: i.string(),
+      status: i.string(),
+      senderBalanceBefore: i.number(),
+      senderBalanceAfter: i.number(),
       sequenceNumber: i.number(),
-      timestamp: i.number().indexed(),  // Chronological sorting key
+      nonce: i.string(),
+      timestamp: i.number(),
       rawPayload: i.string().optional(),// Crypto string packet (if offline)
+    }),
+    // 🌟 THE UNBREAKABLE LOCAL-FIRST SCRATCHPAD ENTITY
+    voucher_claims: i.entity({
+      amount: i.number(),
+      senderId: i.string(),
+      receiverId: i.string(),
+      status: i.string(),
+      timestamp: i.number(),
+      nonce: i.string(),
+      type: i.string(),
     }),
   },
 
-  // 3. Update the Relational Links to point directly to $users
   links: {
-    // Multi-directional relationship links for standard querying and traversal
+    // Your exact existing relationship hooks preserved completely
     userSentTransactions: {
-      forward: { on: "transactions", has: "one", label: "sender" }, // 👈 FIXED: A transaction has exactly ONE sender
+      forward: { on: "transactions", has: "one", label: "sender" },
       reverse: { on: "$users", has: "many", label: "sentTransactions" },
     },
     userReceivedTransactions: {
-      forward: { on: "transactions", has: "one", label: "receiver" }, // 👈 FIXED: A transaction has exactly ONE receiver
+      forward: { on: "transactions", has: "one", label: "receiver" },
       reverse: { on: "$users", has: "many", label: "receivedTransactions" },
+    },
+    // 🌟 RELATIONAL SYSTEM LINK: Relates the claim log to the transaction row via their shared ID
+    voucherClaimTransaction: {
+      forward: { on: "transactions", has: "one", label: "claim" },
+      reverse: { on: "voucher_claims", has: "one", label: "transaction" },
     },
   },
 });

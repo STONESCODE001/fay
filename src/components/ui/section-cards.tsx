@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -38,7 +38,7 @@ export function SectionCards() {
   // ─── 1. HOOK DECLARATIONS ───
   const { user: authState } = db.useAuth();
 
-  // Unified Query Hook: ONLY fetches transactions involving THIS specific user
+  // Unified Query Hook: Fetches profiles, transactions, and matching scratchpad claims simultaneously
   const { data, isLoading } = db.useQuery(
     authState
       ? {
@@ -51,11 +51,23 @@ export function SectionCards() {
                 { "receiver": authState.id }
               ]
             },
-            order: { timestamp: "desc" },
+            order: { serverCreatedAt: "desc" }, // 👈 Use system index
             limit: 10
           },
           sender: {},
           receiver: {}
+        },
+        voucher_claims: {
+          $: {
+            where: {
+              or: [
+                { "senderId": authState.id },
+                { "receiverId": authState.id }
+              ]
+            },
+            order: { serverCreatedAt: "desc" }, // 👈 Use system index here too!
+            limit: 10
+          }
         }
       }
       : null
@@ -79,7 +91,6 @@ export function SectionCards() {
   const dbUser = data?.$users?.[0];
   const userBalance = dbUser?.balance ?? 0;
   const userSequenceNumber = dbUser?.sequenceNumber ?? 0;
-  const recentTransactions = data?.transactions ?? [];
 
   const [isOnline, setIsOnline] = useState(true);
   const connectionStatus = db.useConnectionStatus();
@@ -110,7 +121,7 @@ export function SectionCards() {
     return () => clearInterval(pingInterval);
   }, [connectionStatus]);
 
-  // 🎯 AUTOMATIC NETWORK RECOVERY RELOAD TRIGGER
+  // AUTOMATIC NETWORK RECOVERY RELOAD TRIGGER
   useEffect(() => {
     if (priorConnectionState.current === false && isOnline === true) {
       window.location.reload();
@@ -133,6 +144,66 @@ export function SectionCards() {
     return () => clearTimeout(timer);
   }, [cancelCountdown]);
 
+  // ─── 2.5 REAL-TIME DOUBLE-LEDGER RECONCILIATION ───
+  const computedTransactions = useMemo(() => {
+    const txs = data?.transactions ?? [];
+    const claims = data?.voucher_claims ?? [];
+
+    // Define the concrete blueprint shape of your UI rows
+    interface ReconciledTransaction {
+      id: string;
+      amount: number;
+      nonce: string;
+      timestamp: number;
+      type: string;
+      status: string;
+      senderId?: string;
+      receiverId?: string;
+    }
+
+    const claimsMap = new Map(claims.map(c => [c.id, c]));
+    const processedIds = new Set();
+    // 🌟 Add explicit type annotation to the array instantiation
+    const combinedList: ReconciledTransaction[] = [];
+
+    // 1. Process standard transaction entries
+    // 1. Process standard transaction entries
+    txs.forEach((tx) => {
+      processedIds.add(tx.id);
+      const linkedClaim = claimsMap.get(tx.id);
+
+      combinedList.push({
+        id: tx.id,
+        amount: tx.amount,
+        nonce: tx.nonce,
+        timestamp: tx.timestamp || Date.now(), // 👈 CHANGED: Read from tx.timestamp
+        type: tx.type || "P2P CASH",
+        status: (tx.status === "completed" || !!linkedClaim || !!tx.receiver) ? "completed" : tx.status,
+        senderId: tx.sender?.id,
+        receiverId: tx.receiver?.id || linkedClaim?.receiverId
+      });
+    });
+
+    // 2. Catch and merge orphan offline claims before the sender pushes their transaction block
+    claims.forEach((claim) => {
+      if (processedIds.has(claim.id)) return;
+      processedIds.add(claim.id);
+
+      combinedList.push({
+        id: claim.id,
+        amount: claim.amount,
+        nonce: claim.nonce,
+        timestamp: claim.timestamp,
+        type: "OFFLINE_PAYMENT",
+        status: "completed",
+        senderId: claim.senderId,
+        receiverId: claim.receiverId
+      });
+    });
+
+    return combinedList.sort((a, b) => b.timestamp - a.timestamp);
+  }, [data?.transactions, data?.voucher_claims]);
+
   // ─── 3. INBOUND VOUCHER SCANNING & SECURE PROCESSING ───
   const processIncomingVoucher = async (decodedText: string, html5QrCodeInstance: Html5Qrcode) => {
     if (!authState?.id) {
@@ -153,7 +224,7 @@ export function SectionCards() {
         return;
       }
 
-      // Cryptographic Validation Check
+      // Cryptographic Signature Verification
       const envSecret = import.meta.env.VITE_FAYD_OFFLINE_SECRET || "FALLBACK_DEV_KEY";
       const secretMessage = `${parsed.senderId}-${parsed.amount}-${parsed.senderBalanceBefore}-${parsed.sequenceNumber}-${parsed.timestamp}-${parsed.nonce}`;
 
@@ -180,7 +251,7 @@ export function SectionCards() {
         return;
       }
 
-      // 🎯 FORCE STOP CAMERA INSTANTLY BEFORE BLOCKING ALERTS INTERRUPT RENDERING
+      // FORCE STOP CAMERA INSTANTLY
       try {
         await html5QrCodeInstance.stop();
       } catch (err) {
@@ -188,42 +259,25 @@ export function SectionCards() {
       }
       setIsScannerMounted(false);
 
-      // 🎯 UNIVERSAL PERMISSIONS FIX: Check local cache first
-      const existingTx = recentTransactions.find((t: any) => t.id === parsed.txId);
-
-      if (existingTx) {
-        // 🟢 PATH A (ONLINE-TO-ONLINE): Transaction exists. Avoid modifying keys you don't own!
-        // Simply update transaction status and link yourself as the receiver.
-        await db.transact([
-          db.tx.$users[authState.id].update({
-            balance: userBalance + parsed.amount
-          }),
-          db.tx.transactions[parsed.txId].update({
-            status: "completed"
-          }),
-          db.tx.transactions[parsed.txId].link({ receiver: authState.id })
-        ]);
-      } else {
-        // 🟡 PATH B (OFFLINE-TO-OFFLINE): Transaction record is completely missing from cache. 
-        // Safely build out the local entity structure so your UI increments balance flawlessly.
-        await db.transact([
-          db.tx.$users[authState.id].update({
-            balance: userBalance + parsed.amount
-          }),
-          db.tx.transactions[parsed.txId].update({
-            amount: parsed.amount,
-            type: "OFFLINE_PAYMENT",
-            status: "completed",
-            senderBalanceBefore: parsed.senderBalanceBefore,
-            senderBalanceAfter: parsed.senderBalanceBefore - parsed.amount,
-            sequenceNumber: parsed.sequenceNumber,
-            nonce: parsed.nonce,
-            timestamp: parsed.timestamp
-          }),
-          db.tx.transactions[parsed.txId].link({ receiver: authState.id }),
-          db.tx.transactions[parsed.txId].link({ sender: parsed.senderId })
-        ]);
-      }
+      // 🎯 INGEST MUTATION VIA SEPARATE LEDGER TO PROTECT PERMISSIONS & NETWORK ROLLBACKS
+      await db.transact([
+        // 1. Instantly credit local wallet balance safely
+        db.tx.$users[authState.id].update({
+          balance: userBalance + parsed.amount
+        }),
+        // 2. Write the details into a ledger entry that the receiver completely owns
+        db.tx.voucher_claims[parsed.txId].update({
+          amount: parsed.amount,
+          senderId: parsed.senderId,
+          receiverId: authState.id,
+          status: "completed",
+          timestamp: parsed.timestamp,
+          nonce: parsed.nonce,
+          type: "OFFLINE_INGESTION"
+        }),
+        // 3. Create graph relationship link directly to the transaction slot
+        db.tx.transactions[parsed.txId].link({ receiver: authState.id })
+      ]);
 
       alert(`✅ Successfully processed ₦${parsed.amount}!`);
 
@@ -259,7 +313,7 @@ export function SectionCards() {
         activeEngine.stop().catch((err: any) => console.error(err));
       }
     };
-  }, [isScannerMounted, userBalance, isOnline, recentTransactions]);
+  }, [isScannerMounted, userBalance, isOnline]);
 
   const handleAmountChange = (val: string) => {
     setSendAmount(val);
@@ -278,7 +332,6 @@ export function SectionCards() {
     handleAmountChange(calculated);
   };
 
-  // ─── 4. COUNTER GENERATION, CONDITIONAL DEBIT HOLD, AND SIGNING ───
   const handleConfirmSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (error || !sendAmount || !authState?.id) return;
@@ -343,7 +396,6 @@ export function SectionCards() {
         db.tx.transactions[targetTxId].link({ sender: senderId })
       ]);
 
-      // Trigger cancel button countdown locks
       setActiveTxId(targetTxId);
       setCancelCountdown(20);
 
@@ -527,25 +579,18 @@ export function SectionCards() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {recentTransactions.length === 0 ? (
+              {computedTransactions.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-6 text-gray-400 text-xs">
                     No transactions recorded on this profile yet.
                   </TableCell>
                 </TableRow>
               ) : (
-                recentTransactions.map((tx: any) => {
-                  const senderId = tx.sender?.id || null;
-                  const receiverId = tx.receiver?.id || null;
-
-                  const isSent = senderId === authState.id;
-                  const isReceived = receiverId === authState.id;
+                computedTransactions.map((tx: any) => {
+                  const isSent = tx.senderId === authState.id;
+                  const isReceived = tx.receiverId === authState.id;
 
                   if (!isSent && !isReceived) return null;
-
-                  // Infer dynamic completion safely for pure frontend visual consistency
-                  const hasReceiver = !!receiverId || !!tx.receiver;
-                  const displayStatus = tx.status === "conditional" && hasReceiver ? "completed" : tx.status;
 
                   return (
                     <TableRow key={tx.id}>
@@ -556,18 +601,17 @@ export function SectionCards() {
                         <div className="flex items-center gap-2">
                           <Badge
                             className={
-                              displayStatus === "completed"
+                              tx.status === "completed"
                                 ? "bg-green-50 text-green-700 border-green-200"
-                                : displayStatus === "conditional"
+                                : tx.status === "conditional"
                                   ? "bg-blue-50 text-blue-700 border-blue-200"
                                   : "bg-amber-50 text-amber-700 border-amber-200"
                             }
                           >
-                            {displayStatus === "completed" ? "Completed" : displayStatus === "conditional" ? "Conditional Hold" : "Sync Pending"}
+                            {tx.status === "completed" ? "Completed" : tx.status === "conditional" ? "Conditional Hold" : "Sync Pending"}
                           </Badge>
 
-                          {/* ⏳ LOCK-TIME COOLDOWN COUNTER COMPONENT */}
-                          {displayStatus === "conditional" && isSent && (
+                          {tx.status === "conditional" && isSent && (
                             cancelCountdown > 0 && activeTxId === tx.id ? (
                               <span className="text-[10px] text-gray-400 px-2 py-0.5 font-semibold font-mono">
                                 Cancel in 0:{(cancelCountdown < 10 ? "0" : "") + cancelCountdown}
@@ -584,7 +628,7 @@ export function SectionCards() {
                         </div>
                       </TableCell>
                       <TableCell className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-                        {tx.type ? tx.type.replace("_\", \" ") : "P2P CASH"}
+                        {tx.type ? tx.type.replace("_", " ") : "P2P CASH"}
                       </TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${isSent ? "text-red-600" : "text-emerald-600"}`}>
                         {isSent ? "-" : "+"}₦{typeof tx.amount === 'number' ? tx.amount.toFixed(2) : "0.00"}
