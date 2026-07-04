@@ -259,13 +259,14 @@ export function SectionCards() {
       }
       setIsScannerMounted(false);
 
-      // 🎯 INGEST MUTATION VIA SEPARATE LEDGER TO PROTECT PERMISSIONS & NETWORK ROLLBACKS
+      // 🎯 INGEST MUTATION (Updated to avoid server-side graph links while offline)
       await db.transact([
         // 1. Instantly credit local wallet balance safely
         db.tx.$users[authState.id].update({
           balance: userBalance + parsed.amount
         }),
-        // 2. Write the details into a ledger entry that the receiver completely owns
+        // 2. Write the details into the voucher_claims collection using the txId as the record ID
+        // This acts as our rock-solid anchor that the server will accept unconditionally.
         db.tx.voucher_claims[parsed.txId].update({
           amount: parsed.amount,
           senderId: parsed.senderId,
@@ -274,9 +275,9 @@ export function SectionCards() {
           timestamp: parsed.timestamp,
           nonce: parsed.nonce,
           type: "OFFLINE_INGESTION"
-        }),
-        // 3. Create graph relationship link directly to the transaction slot
-        db.tx.transactions[parsed.txId].link({ receiver: authState.id })
+        })
+        // ❌ REMOVED: db.tx.transactions[parsed.txId].link(...) 
+        // Dropping this line prevents the server from rejecting the sync payload if the sender is still offline!
       ]);
 
       alert(`✅ Successfully processed ₦${parsed.amount}!`);
