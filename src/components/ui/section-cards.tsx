@@ -438,8 +438,8 @@ export function SectionCards() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 dark:*:data-[slot=card]:bg-card">
-      <Card className={`p-3 mb-3 ${isOnline ? 'bg-yellow-200' : 'bg-green-200'}`}>
+    <div id="dashboard" className="grid grid-cols-1 gap-1 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 dark:*:data-[slot=card]:bg-card">
+      <Card data-flow="status-banner" className={`p-3 mb-3 ${isOnline ? 'bg-yellow-200' : 'bg-green-200'}`}>
         <CardHeader>
           <CardDescription className={`flex gap-2 ${isOnline ? 'text-yellow-600' : 'text-green-600'}`}>
             <IconInfoOctagonFilled className="size-4 " />
@@ -471,6 +471,7 @@ export function SectionCards() {
         <Dialog onOpenChange={(isOpen) => { if (!isOpen) setSendStep("FORM_ENTRY"); }}>
           <DialogTrigger asChild>
             <button
+              data-flow="send-btn"
               disabled={!isSyncReady}
               className={`flex-auto flex items-center justify-center gap-2 duration-200 ease-linear rounded-full px-4 py-2 border-3 text-sm font-medium transition-all
                 ${!isSyncReady
@@ -569,6 +570,7 @@ export function SectionCards() {
         <Dialog onOpenChange={(isOpen) => setIsScannerMounted(isOpen)}>
           <DialogTrigger asChild>
             <button
+              data-flow="receive-btn"
               disabled={!isSyncReady}
               className={`flex-auto flex items-center justify-center gap-2 duration-200 ease-linear rounded-full px-4 py-2 border-3 text-sm font-medium transition-all
                 ${!isSyncReady
@@ -597,7 +599,7 @@ export function SectionCards() {
         </Dialog>
       </div>
 
-      <Card>
+      <Card data-flow="history-card">
         <CardHeader>Recent Transactions</CardHeader>
         <CardContent>
           <Table>

@@ -52,3 +52,5 @@ const LinkComponent: LinkComponentType = ({ href, children, className, onClick }
     {children}
   </Link>
 );
+
+export default App;

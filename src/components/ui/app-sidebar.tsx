@@ -58,6 +58,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         >
           Sign out
         </button>
+        <button
+          onClick={() => window.open('https://forms.gle/QJCb4VTT4ekbdEcJ9')}
+          className="bg-gray-200 w-full rounded-lg p-3 text-sm text-gray-800 text-start hover:bg-gray-300"
+        >
+          Give Feedback
+        </button>
+        <button
+          onClick={() => window.location.href = 'mailto:arelivingstoneadeyemi@gmail.com'}
+          className="bg-blue-700 rounded-lg hidden text-start px-4 py-2 font-medium text-sm text-white w-full hover:bg-blue-700"
+        >
+          Email Me
+        </button>
+        <button
+          onClick={() => window.open('https://livingstone-are.vercel.app/', '_blank')}
+          className="bg-gray-600 rounded-lg px-4 py-2 text-sm text-start font-medium text-white w-full hover:bg-blue-700"
+        >
+          Developer
+        </button>
+        <p className="text-xs mt-2 pl-4 text-start text-gray-700"> Made with ❤️ from Nigeria </p>
       </SidebarFooter>
     </Sidebar>
   )
