@@ -96,6 +96,16 @@ export function SectionCards() {
   const connectionStatus = db.useConnectionStatus();
   const priorConnectionState = useRef<boolean | null>(null);
 
+  // 🌟 NEW: Tracks if the database sync layout is completely stable and ready for clicks
+  const isSyncReady = useMemo(() => {
+    // If we are physically online, wait until InstantDB is fully authenticated
+    if (isOnline) {
+      return connectionStatus === "authenticated";
+    }
+    // If we are physically offline, we are ready instantly because we default to local-first paths
+    return true;
+  }, [isOnline, connectionStatus]);
+
   // Connection Polling Thread
   useEffect(() => {
     const verifyActualConnectivity = async () => {
@@ -460,8 +470,21 @@ export function SectionCards() {
       <div className="flex m-2 gap-2">
         <Dialog onOpenChange={(isOpen) => { if (!isOpen) setSendStep("FORM_ENTRY"); }}>
           <DialogTrigger asChild>
-            <button className="flex-auto duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground rounded-full bg-[#F2F4FA] px-4 py-2 border-3 border-[#D9DDE8] text-sm font-medium text-[#4B5563]">
-              Send
+            <button
+              disabled={!isSyncReady}
+              className={`flex-auto flex items-center justify-center gap-2 duration-200 ease-linear rounded-full px-4 py-2 border-3 text-sm font-medium transition-all
+                ${!isSyncReady
+                  ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed opacity-70"
+                  : "bg-[#F2F4FA] border-[#D9DDE8] text-[#4B5563] hover:bg-primary/90 hover:text-primary-foreground"
+                }`}
+            >
+              {!isSyncReady && isOnline && (
+                <svg className="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {!isSyncReady && isOnline ? "Connecting..." : "Send"}
             </button>
           </DialogTrigger>
 
@@ -545,8 +568,15 @@ export function SectionCards() {
 
         <Dialog onOpenChange={(isOpen) => setIsScannerMounted(isOpen)}>
           <DialogTrigger asChild>
-            <button className="flex-auto duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground rounded-full bg-[#F2F4FA] px-4 py-2 border-3 border-[#D9DDE8] text-sm font-medium text-[#4B5563]">
-              Receive
+            <button
+              disabled={!isSyncReady}
+              className={`flex-auto flex items-center justify-center gap-2 duration-200 ease-linear rounded-full px-4 py-2 border-3 text-sm font-medium transition-all
+                ${!isSyncReady
+                  ? "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed opacity-70"
+                  : "bg-[#F2F4FA] border-[#D9DDE8] text-[#4B5563] hover:bg-primary/90 hover:text-primary-foreground"
+                }`}
+            >
+              {!isSyncReady && isOnline ? "Initializing..." : "Receive"}
             </button>
           </DialogTrigger>
 
