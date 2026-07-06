@@ -59,6 +59,7 @@ export default function LandingPage({ onStartApp }: LandingPageProps) {
         <div className="hero relative">
           <img src={myLogo} alt="FAY_LOGO" width="200" />
         </div>
+        <iframe width="560" height="315" src="https://www.youtube.com/embed/I4VOnjrbxq0?si=nCX17LrEBAws-6qO" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
         <div className="space-y-2 text-center">
           <h1 className="text-4xl font-medium tracking-tight md:text-5xl">
